@@ -461,7 +461,7 @@ static CGFloat const kTabCardURLHeight = 64.0;
 }
 
 - (NSInteger)numberOfDisplayItems {
-    return self.viewModel.tabs.count + 1;
+    return self.viewModel.tabs.count;
 }
 
 - (NSInteger)activeTabDisplayItemIndex {

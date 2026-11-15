@@ -176,6 +176,35 @@ static BOOL const kBrowserYouTubeNativeExtractionEnabled = NO;
     [self presentNativeVideoPlayerForURL:URL title:title requestHeaders:nil cookies:nil];
 }
 
+- (void)presentRequestedVideoFullscreenForURL:(NSURL *)URL title:(NSString *)title {
+    if (URL == nil) {
+        return;
+    }
+
+    NSURL *pageURL = self.host.browserWebView.request.URL;
+    NSMutableDictionary<NSString *, NSString *> *headers = [NSMutableDictionary dictionary];
+    NSString *userAgent = [[NSUserDefaults standardUserDefaults] stringForKey:kUserAgentDefaultsKey];
+    if (userAgent.length > 0) {
+        headers[@"User-Agent"] = userAgent;
+    }
+    if (pageURL.absoluteString.length > 0) {
+        headers[@"Referer"] = pageURL.absoluteString;
+        headers[@"Origin"] = [NSString stringWithFormat:@"%@://%@", pageURL.scheme ?: @"https", pageURL.host ?: @""];
+    }
+    NSMutableArray<NSHTTPCookie *> *cookies = [NSMutableArray array];
+    if (pageURL != nil) {
+        [cookies addObjectsFromArray:[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:pageURL]];
+    }
+    [cookies addObjectsFromArray:[[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:URL]];
+
+    [self.host.browserWebView pauseAllMediaPlayback];
+    BrowserNativeVideoPlayerViewController *playerViewController = [[BrowserNativeVideoPlayerViewController alloc] initWithURL:URL
+                                                                                                                          title:title
+                                                                                                                  requestHeaders:headers
+                                                                                                                         cookies:cookies];
+    [self.host browserPresentViewController:playerViewController];
+}
+
 - (void)presentNativeVideoPlayerForURL:(NSURL *)URL
                                  title:(NSString *)title
                         requestHeaders:(NSDictionary<NSString *, NSString *> *)requestHeaders

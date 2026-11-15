@@ -10,6 +10,8 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)webViewDidStartLoad:(id _Nonnull)webView;
 - (void)webViewDidFinishLoad:(id _Nonnull)webView;
 - (void)webView:(id _Nonnull)webView didFailLoadWithError:(NSError * _Nonnull)error;
+/// Message posted by BrowserPageAgent.js from the main frame, e.g. {type: "fs", active: true}.
+- (void)webView:(id _Nonnull)webView didReceiveAgentMessage:(NSDictionary * _Nonnull)message;
 
 @end
 
@@ -34,7 +36,12 @@ NS_ASSUME_NONNULL_BEGIN
 - (nullable NSString *)stringByEvaluatingJavaScriptFromString:(NSString * _Nonnull)script;
 - (NSString * _Nonnull)runtimeMediaPreferenceReport;
 - (void)setUserAgent:(NSString * _Nullable)userAgent;
+/// Fire-and-forget evaluation for calls made many times per second (edge scrolling).
+- (void)evaluateJavaScriptWithoutWaiting:(NSString * _Nonnull)script;
 - (void)pauseAllMediaPlayback;
+
++ (BOOL)isAdBlockEnabled;
++ (void)setAdBlockEnabled:(BOOL)enabled;
 
 + (nullable NSData *)cookieDataRepresentation;
 + (NSArray<NSHTTPCookie *> * _Nonnull)allCookies;

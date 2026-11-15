@@ -164,9 +164,6 @@ static UIColor *BrowserPageActionTextColor(void) {
 }
 
 - (BOOL)handlePageSelectionAtDOMPoint:(CGPoint)point webView:(BrowserWebView *)webView {
-    if ([self.videoPlaybackCoordinator handleSelectPressForVideoAtCursor]) {
-        return YES;
-    }
     if ([self handleTargetBlankLinkAtDOMPoint:point webView:webView]) {
         return YES;
     }

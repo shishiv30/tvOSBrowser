@@ -19,6 +19,7 @@
 		3A2A7C2421E790000083CB13 /* plus.png in Resources */ = {isa = PBXBuildFile; fileRef = 3A2A7C2321E790000083CB13 /* plus.png */; };
 		9675E1FC20855F6500A4A84A /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9675E1FB20855F6500A4A84A /* Foundation.framework */; };
 		9675E1FF20857AEF00A4A84A /* UIKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9675E1FE20857AEF00A4A84A /* UIKit.framework */; };
+		C0C0E0111BAE420500C744AF /* GameController.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C0C0E0121BAE420500C744AF /* GameController.framework */; };
 		A1B49A482D67F2B3001D58A1 /* BrowserTabViewModel.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B49A472D67F2B3001D58A1 /* BrowserTabViewModel.m */; };
 		A1B49A4B2D67F2C3001D58A1 /* BrowserViewModel.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B49A4A2D67F2C3001D58A1 /* BrowserViewModel.m */; };
 		A1B49A4E2D680900001D58A1 /* BrowserNavigationService.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B49A4D2D680900001D58A1 /* BrowserNavigationService.m */; };
@@ -43,9 +44,12 @@
 		A1B49A952D700040001D58A1 /* BrowserRemoteInputController.m in Sources */ = {isa = PBXBuildFile; fileRef = A1B49A942D700040001D58A1 /* BrowserRemoteInputController.m */; };
 		B002B8671BAE420500C744AF /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = B002B8661BAE420500C744AF /* main.m */; };
 		B002B86A1BAE420500C744AF /* AppDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = B002B8691BAE420500C744AF /* AppDelegate.m */; };
+		C0C0E0011BAE420500C744AF /* SceneDelegate.m in Sources */ = {isa = PBXBuildFile; fileRef = C0C0E0021BAE420500C744AF /* SceneDelegate.m */; };
 		B002B86D1BAE420500C744AF /* ViewController.m in Sources */ = {isa = PBXBuildFile; fileRef = B002B86C1BAE420500C744AF /* ViewController.m */; };
 		B002B8701BAE420500C744AF /* Main.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = B002B86E1BAE420500C744AF /* Main.storyboard */; };
 		B002B8721BAE420500C744AF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B002B8711BAE420500C744AF /* Assets.xcassets */; };
+		C0C0E0A11BAE420500C744AF /* BrowserPageAgent.js in Resources */ = {isa = PBXBuildFile; fileRef = C0C0E0A21BAE420500C744AF /* BrowserPageAgent.js */; };
+		C0C0E0A31BAE420500C744AF /* GamepadTest.html in Resources */ = {isa = PBXBuildFile; fileRef = C0C0E0A41BAE420500C744AF /* GamepadTest.html */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -61,6 +65,7 @@
 		3A2A7C2321E790000083CB13 /* plus.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = plus.png; sourceTree = "<group>"; };
 		9675E1FB20855F6500A4A84A /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		9675E1FE20857AEF00A4A84A /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
+		C0C0E0121BAE420500C744AF /* GameController.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = GameController.framework; path = System/Library/Frameworks/GameController.framework; sourceTree = SDKROOT; };
 		A1B49A462D67F2B3001D58A1 /* BrowserTabViewModel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BrowserTabViewModel.h; sourceTree = "<group>"; };
 		A1B49A472D67F2B3001D58A1 /* BrowserTabViewModel.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = BrowserTabViewModel.m; sourceTree = "<group>"; };
 		A1B49A492D67F2C3001D58A1 /* BrowserViewModel.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = BrowserViewModel.h; sourceTree = "<group>"; };
@@ -104,10 +109,14 @@
 		B002B8661BAE420500C744AF /* main.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = main.m; sourceTree = "<group>"; };
 		B002B8681BAE420500C744AF /* AppDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AppDelegate.h; sourceTree = "<group>"; };
 		B002B8691BAE420500C744AF /* AppDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = AppDelegate.m; sourceTree = "<group>"; };
+		C0C0E0021BAE420500C744AF /* SceneDelegate.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SceneDelegate.m; sourceTree = "<group>"; };
+		C0C0E0031BAE420500C744AF /* SceneDelegate.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = SceneDelegate.h; sourceTree = "<group>"; };
 		B002B86B1BAE420500C744AF /* ViewController.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ViewController.h; sourceTree = "<group>"; };
 		B002B86C1BAE420500C744AF /* ViewController.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ViewController.m; sourceTree = "<group>"; };
 		B002B86F1BAE420500C744AF /* Base */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; name = Base; path = Base.lproj/Main.storyboard; sourceTree = "<group>"; };
 		B002B8711BAE420500C744AF /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		C0C0E0A21BAE420500C744AF /* BrowserPageAgent.js */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.javascript; path = BrowserPageAgent.js; sourceTree = "<group>"; };
+		C0C0E0A41BAE420500C744AF /* GamepadTest.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = GamepadTest.html; sourceTree = "<group>"; };
 		B002B8731BAE420500C744AF /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		B0F6B4611BAEBF9900E2F26B /* ../README.mdown */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = net.daringfireball.markdown; path = ../README.mdown; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -118,6 +127,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				9675E1FF20857AEF00A4A84A /* UIKit.framework in Frameworks */,
+				C0C0E0111BAE420500C744AF /* GameController.framework in Frameworks */,
 				9675E1FC20855F6500A4A84A /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -147,6 +157,7 @@
 			isa = PBXGroup;
 			children = (
 				9675E1FE20857AEF00A4A84A /* UIKit.framework */,
+				C0C0E0121BAE420500C744AF /* GameController.framework */,
 				9675E1FB20855F6500A4A84A /* Foundation.framework */,
 			);
 			name = Frameworks;
@@ -157,6 +168,8 @@
 			children = (
 				B002B8681BAE420500C744AF /* AppDelegate.h */,
 				B002B8691BAE420500C744AF /* AppDelegate.m */,
+				C0C0E0031BAE420500C744AF /* SceneDelegate.h */,
+				C0C0E0021BAE420500C744AF /* SceneDelegate.m */,
 			);
 			name = App;
 			sourceTree = "<group>";
@@ -308,6 +321,8 @@
 				B002B8661BAE420500C744AF /* main.m */,
 				B002B86E1BAE420500C744AF /* Main.storyboard */,
 				B002B8711BAE420500C744AF /* Assets.xcassets */,
+				C0C0E0A21BAE420500C744AF /* BrowserPageAgent.js */,
+				C0C0E0A41BAE420500C744AF /* GamepadTest.html */,
 				B002B8731BAE420500C744AF /* Info.plist */,
 			);
 			name = "Supporting Files";
@@ -377,6 +392,8 @@
 				3A2A7C2221E790000083CB13 /* multi-tab.png in Resources */,
 				3A2A7C2421E790000083CB13 /* plus.png in Resources */,
 				B002B8721BAE420500C744AF /* Assets.xcassets in Resources */,
+				C0C0E0A11BAE420500C744AF /* BrowserPageAgent.js in Resources */,
+				C0C0E0A31BAE420500C744AF /* GamepadTest.html in Resources */,
 				B002B8701BAE420500C744AF /* Main.storyboard in Resources */,
 				3A2A7C1821E7805D0083CB13 /* right-arrow-forward.png in Resources */,
 				3A2A7C1E21E7842F0083CB13 /* menu-2.png in Resources */,
@@ -434,6 +451,7 @@
 				A1B49A4B2D67F2C3001D58A1 /* BrowserViewModel.m in Sources */,
 				B002B86D1BAE420500C744AF /* ViewController.m in Sources */,
 				B002B86A1BAE420500C744AF /* AppDelegate.m in Sources */,
+				C0C0E0011BAE420500C744AF /* SceneDelegate.m in Sources */,
 				B002B8671BAE420500C744AF /* main.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -570,7 +588,7 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 3000;
-				DEVELOPMENT_TEAM = PMC4RZG4LF;
+				DEVELOPMENT_TEAM = 64RN7X59SK;
 				EMBED_ASSET_PACKS_IN_PRODUCT_BUNDLE = YES;
 				ENABLE_ON_DEMAND_RESOURCES = NO;
 				FRAMEWORK_SEARCH_PATHS = "";
@@ -580,10 +598,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 2.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jva.tvbrowser;
+				PRODUCT_BUNDLE_IDENTIFIER = com.conjeezou.tvbrowser;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SCAN_ALL_SOURCE_FILES_FOR_INCLUDES = NO;
-				TVOS_DEPLOYMENT_TARGET = 15.6;
+				TVOS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Debug;
 		};
@@ -595,7 +613,7 @@
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CURRENT_PROJECT_VERSION = 3000;
-				DEVELOPMENT_TEAM = PMC4RZG4LF;
+				DEVELOPMENT_TEAM = 64RN7X59SK;
 				EMBED_ASSET_PACKS_IN_PRODUCT_BUNDLE = YES;
 				ENABLE_ON_DEMAND_RESOURCES = NO;
 				FRAMEWORK_SEARCH_PATHS = "";
@@ -605,10 +623,10 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 2.0.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.jva.tvbrowser;
+				PRODUCT_BUNDLE_IDENTIFIER = com.conjeezou.tvbrowser;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SCAN_ALL_SOURCE_FILES_FOR_INCLUDES = NO;
-				TVOS_DEPLOYMENT_TARGET = 15.6;
+				TVOS_DEPLOYMENT_TARGET = 27.0;
 			};
 			name = Release;
 		};

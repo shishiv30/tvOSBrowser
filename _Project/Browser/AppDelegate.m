@@ -49,7 +49,66 @@
         [[NSUserDefaults standardUserDefaults] synchronize];
     }
     [self restoreCookiesFromDefaults];
+    [self installDefaultFavorites];
 	return YES;
+}
+
+- (NSString *)favoriteHostForURLString:(NSString *)URLString {
+    NSString *host = [NSURL URLWithString:URLString].host.lowercaseString;
+    if ([host hasPrefix:@"www."]) {
+        host = [host substringFromIndex:4];
+    }
+    return host ?: @"";
+}
+
+- (void)installDefaultFavorites {
+    NSArray<NSArray<NSString *> *> *defaultFavorites = @[
+        @[@"https://www.kubb.tv", @"kubb"],
+        @[@"https://www.douyin.com", @"douyin"],
+        @[@"https://www.rednote.com", @"rednote"],
+        @[@"https://www.bilibili.com", @"bilibili"],
+        @[@"https://www.suno.com", @"suno"],
+        @[@"https://www.youtube.com", @"youtube"],
+        @[@"tvbrowser://gamepad-test", @"Gamepad Test"],
+    ];
+    NSMutableArray *existingFavorites = [[[NSUserDefaults standardUserDefaults] arrayForKey:@"FAVORITES"] mutableCopy];
+    if (existingFavorites == nil) {
+        existingFavorites = [NSMutableArray array];
+    }
+
+    // Former defaults: dropped from an existing install so the replacement does not sit next to them.
+    NSSet<NSString *> *retiredDefaultHosts = [NSSet setWithObject:@"iyf.tv"];
+
+    NSMutableArray *favorites = [NSMutableArray array];
+    NSMutableSet<NSString *> *defaultHosts = [NSMutableSet set];
+    for (NSArray<NSString *> *entry in defaultFavorites) {
+        NSString *host = [self favoriteHostForURLString:entry[0]];
+        if (host.length == 0) {
+            continue;
+        }
+        [defaultHosts addObject:host];
+        NSArray *savedEntry = entry;
+        for (NSArray *existingEntry in existingFavorites) {
+            NSString *existingURL = existingEntry.count > 0 ? existingEntry[0] : @"";
+            if ([[self favoriteHostForURLString:existingURL] isEqualToString:host]) {
+                savedEntry = @[existingURL.length > 0 ? existingURL : entry[0], entry[1]];
+                break;
+            }
+        }
+        [favorites addObject:savedEntry];
+    }
+
+    for (NSArray *existingEntry in existingFavorites) {
+        NSString *existingURL = existingEntry.count > 0 ? existingEntry[0] : @"";
+        NSString *host = [self favoriteHostForURLString:existingURL];
+        if (host.length == 0 || [defaultHosts containsObject:host] || [retiredDefaultHosts containsObject:host]) {
+            continue;
+        }
+        [favorites addObject:existingEntry];
+    }
+
+    [[NSUserDefaults standardUserDefaults] setObject:favorites forKey:@"FAVORITES"];
+    [[NSUserDefaults standardUserDefaults] synchronize];
 }
 
 - (void)applicationWillResignActive:(UIApplication *)application {

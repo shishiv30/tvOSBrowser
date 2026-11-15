@@ -46,6 +46,10 @@ static UIColor *kTextColor(void) {
 @property (nonatomic) BOOL displayedHintsOnLaunch;
 @property (nonatomic) BOOL scrollViewAllowBounces;
 @property (nonatomic, getter=isTopBarFocusActive) BOOL topBarFocusActive;
+/// A page video currently fills the screen (driven by BrowserPageAgent.js).
+@property (nonatomic) BOOL pageVideoActive;
+@property (nonatomic) CFTimeInterval lastPageClickTimestamp;
+@property (nonatomic, weak) UILabel *toastLabel;
 
 @end
 
@@ -243,7 +247,7 @@ static UIColor *kTextColor(void) {
         case BrowserTopBarActionFullscreen:
             if (self.viewModel.topNavigationBarVisible) {
                 UIAlertController *alertController = [UIAlertController alertControllerWithTitle:@"Hide Top Navigation bar?"
-                                                                                         message:@"You can still open the side menu by double-tapping the Play/Pause button."
+                                                                                         message:@"You can bring it back from the Quick Menu (Play/Pause button)."
                                                                                   preferredStyle:UIAlertControllerStyleAlert];
                 [alertController addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
                 [alertController addAction:[UIAlertAction actionWithTitle:@"Hide Bar"
@@ -359,6 +363,14 @@ static UIColor *kTextColor(void) {
                                                                              message:@""
                                                                       preferredStyle:UIAlertControllerStyleAlert];
 
+    if (self.webview.canGoBack) {
+        [alertController addAction:[UIAlertAction actionWithTitle:@"Go Back"
+                                                            style:UIAlertActionStyleDefault
+                                                          handler:^(__unused UIAlertAction *action) {
+            [self.webview goBack];
+        }]];
+    }
+
     if (self.webview.canGoForward) {
         [alertController addAction:[UIAlertAction actionWithTitle:@"Go Forward"
                                                             style:UIAlertActionStyleDefault
@@ -382,13 +394,113 @@ static UIColor *kTextColor(void) {
         }]];
     }
 
+    NSString *fullScreenTitle = self.viewModel.topNavigationBarVisible ? @"Full Screen" : @"Exit Full Screen";
+    [alertController addAction:[UIAlertAction actionWithTitle:fullScreenTitle
+                                                        style:UIAlertActionStyleDefault
+                                                      handler:^(__unused UIAlertAction *action) {
+        if (self.viewModel.topNavigationBarVisible) {
+            [self browserHideTopNav];
+        } else {
+            [self browserShowTopNav];
+        }
+    }]];
+
+    BOOL adBlockEnabled = [BrowserWebView isAdBlockEnabled];
+    [alertController addAction:[UIAlertAction actionWithTitle:adBlockEnabled ? @"Ad Block: On" : @"Ad Block: Off"
+                                                        style:UIAlertActionStyleDefault
+                                                      handler:^(__unused UIAlertAction *action) {
+        [BrowserWebView setAdBlockEnabled:!adBlockEnabled];
+        [self.webview reload];
+    }]];
+    if (self.remoteInputController.gameModeAvailable) {
+        // Hands the controller to the page as a Gamepad; only the controller can switch it back.
+        NSString *title = [NSString stringWithFormat:@"Game Mode (hold %@ to exit)", self.remoteInputController.gameModeToggleButtonName];
+        [alertController addAction:[UIAlertAction actionWithTitle:title
+                                                            style:UIAlertActionStyleDefault
+                                                          handler:^(__unused UIAlertAction *action) {
+            self.remoteInputController.gameModeEnabled = YES;
+        }]];
+    }
+    [alertController addAction:[UIAlertAction actionWithTitle:@"More Options"
+                                                        style:UIAlertActionStyleDefault
+                                                      handler:^(__unused UIAlertAction *action) {
+        [self showAdvancedMenu];
+    }]];
+
+    [self addQuickMenuFavoriteActionsToAlertController:alertController];
+
     [alertController addAction:[UIAlertAction actionWithTitle:nil style:UIAlertActionStyleCancel handler:nil]];
     [self presentViewController:alertController animated:YES completion:nil];
 }
 
+- (NSString *)quickMenuHostForURLString:(NSString *)URLString {
+    NSString *host = [NSURL URLWithString:URLString].host.lowercaseString;
+    if ([host hasPrefix:@"www."]) {
+        host = [host substringFromIndex:4];
+    }
+    return host ?: @"";
+}
+
+- (void)addQuickMenuFavoriteActionsToAlertController:(UIAlertController *)alertController {
+    NSString *currentHost = [self quickMenuHostForURLString:self.webview.request.URL.absoluteString];
+    NSArray *favorites = [[NSUserDefaults standardUserDefaults] arrayForKey:@"FAVORITES"];
+    NSInteger matchedIndex = NSNotFound;
+    if (currentHost.length > 0) {
+        for (NSUInteger index = 0; index < favorites.count; index += 1) {
+            NSArray *entry = favorites[index];
+            NSString *URLString = entry.count > 0 ? entry[0] : @"";
+            if ([[self quickMenuHostForURLString:URLString] isEqualToString:currentHost]) {
+                matchedIndex = (NSInteger)index;
+                break;
+            }
+        }
+    }
+
+    __weak typeof(self) weakSelf = self;
+    if (currentHost.length > 0 && matchedIndex == NSNotFound) {
+        [alertController addAction:[UIAlertAction actionWithTitle:@"Add Favorite"
+                                                            style:UIAlertActionStyleDefault
+                                                          handler:^(__unused UIAlertAction *action) {
+            NSURL *URL = weakSelf.webview.request.URL;
+            NSString *scheme = URL.scheme.length > 0 ? URL.scheme : @"https";
+            NSString *favoriteURL = [NSString stringWithFormat:@"%@://%@", scheme, URL.host];
+            NSMutableArray *updatedFavorites = [favorites mutableCopy] ?: [NSMutableArray array];
+            [updatedFavorites addObject:@[favoriteURL, currentHost]];
+            [[NSUserDefaults standardUserDefaults] setObject:updatedFavorites forKey:@"FAVORITES"];
+        }]];
+    } else if (matchedIndex != NSNotFound) {
+        [alertController addAction:[UIAlertAction actionWithTitle:@"Remove Favorite"
+                                                            style:UIAlertActionStyleDestructive
+                                                          handler:^(__unused UIAlertAction *action) {
+            NSMutableArray *updatedFavorites = [favorites mutableCopy];
+            if (matchedIndex >= 0 && matchedIndex < (NSInteger)updatedFavorites.count) {
+                [updatedFavorites removeObjectAtIndex:(NSUInteger)matchedIndex];
+                [[NSUserDefaults standardUserDefaults] setObject:updatedFavorites forKey:@"FAVORITES"];
+            }
+        }]];
+    }
+
+    for (NSArray *entry in favorites) {
+        NSString *URLString = entry.count > 0 ? [entry[0] copy] : @"";
+        NSString *title = entry.count > 1 ? entry[1] : @"";
+        if (URLString.length == 0) {
+            continue;
+        }
+        NSString *displayTitle = title.length > 0 ? title : URLString;
+        [alertController addAction:[UIAlertAction actionWithTitle:displayTitle
+                                                            style:UIAlertActionStyleDefault
+                                                          handler:^(__unused UIAlertAction *action) {
+            NSURL *URL = [NSURL URLWithString:URLString];
+            if (URL != nil) {
+                [weakSelf.webview loadRequest:[NSURLRequest requestWithURL:URL]];
+            }
+        }]];
+    }
+}
+
 - (void)showHintsAlert {
     UIAlertController *alertController = [UIAlertController alertControllerWithTitle:@"Usage Guide"
-                                                                             message:@"Double press the touch area to switch between cursor & scroll mode.\nPress the touch area while in cursor mode to click.\nSingle tap to Menu button to Go Back, or Exit on root page.\nSingle tap the Play/Pause button to: Go Forward, Enter URL or Reload Page.\nDouble tap the Play/Pause to show the Advanced Menu with more options.\nUse the tabs icon in the top bar to open the tab overview."
+                                                                             message:@"Arrows / D-pad move the cursor; push against a screen edge to scroll.\nSelect / A clicks. Clicking a video plays it full screen.\nMenu / B goes back, and leaves full screen video.\nPlay/Pause / X opens the Quick Menu.\nIn full screen: Select pauses, Left/Right skip 10 seconds."
                                                                       preferredStyle:UIAlertControllerStyleAlert];
 
     __weak typeof(self) weakSelf = self;
@@ -411,8 +523,117 @@ static UIColor *kTextColor(void) {
     [self presentViewController:alertController animated:YES completion:nil];
 }
 
+#pragma mark - Page video full screen
+
+// The page script makes the <video> (or the iframe holding it) fill the web view, so it works for
+// blob/MSE players that AVPlayer cannot open. Natively we only hide the chrome and route the keys.
+- (void)setPageVideoActive:(BOOL)pageVideoActive {
+    if (_pageVideoActive == pageVideoActive) {
+        return;
+    }
+    _pageVideoActive = pageVideoActive;
+    [self updateTopNavigationForImmersiveState];
+    [self.remoteInputController refreshInteractionState];
+}
+
+/// A full screen video and game mode both take the whole screen: no top bar while either is on.
+- (void)updateTopNavigationForImmersiveState {
+    if (self.pageVideoActive || self.remoteInputController.gameModeEnabled) {
+        [self deactivateTopBarFocusMode];
+        [self.tabCoordinator setTopNavigationVisible:NO];
+    } else {
+        [self.tabCoordinator setTopNavigationVisible:self.preferencesStore.topNavigationBarVisible];
+    }
+}
+
+#pragma mark - Game mode
+
+- (void)browserRemoteInputControllerGameModeDidChange:(BOOL)enabled toggleButtonName:(NSString *)toggleButtonName {
+    [self updateTopNavigationForImmersiveState];
+    NSString *message = enabled
+        ? [NSString stringWithFormat:@"Game Mode On  ·  hold %@ to return to the browser", toggleButtonName]
+        : @"Game Mode Off";
+    [self showToastWithMessage:message];
+}
+
+- (void)browserRemoteInputControllerEvaluateGamepadScript:(NSString *)script {
+    [self.webview evaluateJavaScriptWithoutWaiting:script];
+}
+
+- (void)showToastWithMessage:(NSString *)message {
+    [self.toastLabel removeFromSuperview];
+    UILabel *label = [UILabel new];
+    label.text = [NSString stringWithFormat:@"   %@   ", message];
+    label.font = [UIFont systemFontOfSize:30.0 weight:UIFontWeightSemibold];
+    label.textColor = UIColor.whiteColor;
+    label.backgroundColor = [UIColor colorWithWhite:0.0 alpha:0.78];
+    label.textAlignment = NSTextAlignmentCenter;
+    label.layer.cornerRadius = 18.0;
+    label.layer.masksToBounds = YES;
+    [label sizeToFit];
+    CGRect frame = CGRectInset(label.frame, 0.0, -14.0);
+    frame.origin = CGPointMake(CGRectGetMidX(self.view.bounds) - CGRectGetWidth(frame) / 2.0,
+                               CGRectGetMaxY(self.view.bounds) - CGRectGetHeight(frame) - 70.0);
+    label.frame = frame;
+    [self.view addSubview:label];
+    self.toastLabel = label;
+    [UIView animateWithDuration:0.4 delay:3.0 options:UIViewAnimationOptionCurveEaseIn animations:^{
+        label.alpha = 0.0;
+    } completion:^(__unused BOOL finished) {
+        [label removeFromSuperview];
+    }];
+}
+
+- (NSString *)evaluatePageAgentCall:(NSString *)call fallback:(NSString *)fallback {
+    if (self.webview == nil) {
+        return fallback;
+    }
+    NSString *script = [NSString stringWithFormat:@"(function(){try{return window.__tvb?String(window.__tvb.%@):'%@';}catch(error){return '%@';}})();",
+                        call, fallback, fallback];
+    return [self.webview stringByEvaluatingJavaScriptFromString:script] ?: fallback;
+}
+
+/// Asks the page directly. The page also pushes changes (see -webView:didReceiveAgentMessage:);
+/// this covers the moments where a push could have been missed.
+- (BOOL)syncPageVideoState {
+    BOOL active = [[self evaluatePageAgentCall:@"state()" fallback:@"0"] isEqualToString:@"1"];
+    self.pageVideoActive = active;
+    return active;
+}
+
+- (void)schedulePageVideoStateChecks {
+    __weak typeof(self) weakSelf = self;
+    for (NSNumber *delay in @[@0.4, @1.2, @2.5, @5.0]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(delay.doubleValue * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+            if (weakSelf.presentedViewController == nil) {
+                [weakSelf syncPageVideoState];
+            }
+        });
+    }
+}
+
+- (void)exitPageVideo {
+    [self evaluatePageAgentCall:@"exit()" fallback:@""];
+    self.pageVideoActive = NO;
+}
+
+- (BOOL)browserFullscreenVideoActive {
+    return self.pageVideoActive;
+}
+
+- (void)webView:(id)webView didReceiveAgentMessage:(NSDictionary *)message {
+    if (webView != self.webview || ![message[@"type"] isEqual:@"fs"]) {
+        return;
+    }
+    self.pageVideoActive = [message[@"active"] respondsToSelector:@selector(boolValue)] && [message[@"active"] boolValue];
+}
+
 - (void)browserHandlePrimaryAction {
-    if (!self.remoteInputController.cursorModeEnabled || self.webview == nil) {
+    if (self.webview == nil) {
+        return;
+    }
+    if (!self.remoteInputController.cursorModeEnabled) {
+        [self activateFocusedPageElement];
         return;
     }
 
@@ -423,7 +644,20 @@ static UIColor *kTextColor(void) {
     }
 
     CGPoint domPoint = [self browserDOMPointForCursor];
-    [self.pageActionCoordinator handlePageSelectionAtDOMPoint:domPoint webView:self.webview];
+    self.lastPageClickTimestamp = CACurrentMediaTime();
+    NSString *call = [NSString stringWithFormat:@"activate(%0.2f,%0.2f,false)", domPoint.x, domPoint.y];
+    NSString *result = [self evaluatePageAgentCall:call fallback:@"none"];
+    if ([result isEqualToString:@"video"]) {
+        // A video is under the cursor: it is now full screen and playing.
+        self.pageVideoActive = YES;
+        return;
+    }
+    if (![result isEqualToString:@"frame"]) {
+        // "frame" means a cross-origin iframe took the click itself; everything else is a normal click.
+        [self.pageActionCoordinator handlePageSelectionAtDOMPoint:domPoint webView:self.webview];
+    }
+    // The click may start a player a moment later; the page script then goes full screen on its own.
+    [self schedulePageVideoStateChecks];
 }
 
 - (NSArray<id<UIFocusEnvironment>> *)preferredFocusEnvironments {
@@ -656,10 +890,53 @@ static UIColor *kTextColor(void) {
     [self browserHandlePrimaryAction];
 }
 
+- (BOOL)browserRemoteInputControllerPageVideoActive {
+    return self.pageVideoActive;
+}
+
+- (void)browserRemoteInputControllerPageVideoToggle {
+    [self evaluatePageAgentCall:@"command('toggle')" fallback:@""];
+}
+
+- (void)browserRemoteInputControllerPageVideoSeekBy:(NSTimeInterval)delta {
+    [self evaluatePageAgentCall:[NSString stringWithFormat:@"command('seek',%0.1f)", delta] fallback:@""];
+}
+
+- (void)browserRemoteInputControllerPageVideoExit {
+    [self exitPageVideo];
+}
+
+- (void)browserRemoteInputControllerScrollPageByDelta:(CGPoint)delta {
+    if (self.webview == nil || self.pageVideoActive) {
+        return;
+    }
+    CGPoint point = [self.view convertPoint:self.remoteInputController.cursorView.frame.origin toView:self.webview];
+    point.y = MAX(point.y, 1.0);
+    NSString *script = [NSString stringWithFormat:@"window.__tvb&&window.__tvb.scrollBy(%0.1f,%0.1f,%0.1f,%0.1f);",
+                        point.x, point.y, delta.x, delta.y];
+    [self.webview evaluateJavaScriptWithoutWaiting:script];
+}
+
+- (void)browserRemoteInputControllerScrollPageByViewportFraction:(CGFloat)fraction {
+    if (self.webview == nil || self.pageVideoActive) {
+        return;
+    }
+    CGPoint point = [self.view convertPoint:self.remoteInputController.cursorView.frame.origin toView:self.webview];
+    point.y = MAX(point.y, 1.0);
+    NSString *script = [NSString stringWithFormat:@"window.__tvb&&window.__tvb.page(%0.1f,%0.1f,%0.2f);", point.x, point.y, fraction];
+    [self.webview evaluateJavaScriptWithoutWaiting:script];
+}
+
+- (void)browserRemoteInputControllerFunctionKeyDown {
+    [self.webview evaluateJavaScriptWithoutWaiting:@"window.__tvb&&window.__tvb.guard();"];
+}
+
 - (void)browserRemoteInputControllerHandleMenuPress {
     UIAlertController *alertController = (UIAlertController *)self.presentedViewController;
     if (alertController != nil) {
         [self.presentedViewController dismissViewControllerAnimated:YES completion:nil];
+    } else if ([self syncPageVideoState]) {
+        [self exitPageVideo];
     } else if (self.webview.canGoBack) {
         [self.webview goBack];
     } else {
@@ -685,10 +962,6 @@ static UIColor *kTextColor(void) {
     }
 }
 
-- (void)browserRemoteInputControllerHandleAdvancedMenuPress {
-    [self showAdvancedMenu];
-}
-
 - (NSString *)browserRemoteInputControllerHoverStateAtCursorPoint:(CGPoint)point {
     if (self.webview.request == nil) {
         return @"false";
@@ -707,6 +980,156 @@ static UIColor *kTextColor(void) {
 
 - (void)browserRemoteInputControllerPersistSession {
     [self.tabCoordinator persistSession];
+}
+
+- (NSString *)browserFocusScriptForDirection:(NSString *)direction {
+    return [NSString stringWithFormat:
+            @"(function(){"
+            "var selector='a[href],button,input,textarea,select,summary,[contenteditable=\"true\"],[role=\"button\"],[role=\"link\"],[tabindex]:not([tabindex=\"-1\"])';"
+            "function visible(el){"
+            "if(!el||el.disabled){return false;}"
+            "var style=window.getComputedStyle(el);"
+            "if(style.display==='none'||style.visibility==='hidden'||style.visibility==='collapse'){return false;}"
+            "var r=el.getBoundingClientRect();"
+            "if(r.width<2||r.height<2){return false;}"
+            "if(r.bottom<0||r.top>window.innerHeight||r.right<0||r.left>window.innerWidth){return false;}"
+            "return true;"
+            "}"
+            "var nodes=Array.prototype.filter.call(document.querySelectorAll(selector),visible);"
+            "var active=document.activeElement;"
+            "var current=nodes.indexOf(active)>=0?active:null;"
+            "var origin=current?current.getBoundingClientRect():{left:window.innerWidth/2,top:window.innerHeight/2,width:0,height:0};"
+            "var cx=origin.left+origin.width/2;"
+            "var cy=origin.top+origin.height/2;"
+            "var dir='%@';"
+            "var best=null;var bestScore=Infinity;"
+            "nodes.forEach(function(el){"
+            "if(el===current){return;}"
+            "var r=el.getBoundingClientRect();"
+            "var dx=(r.left+r.width/2)-cx;"
+            "var dy=(r.top+r.height/2)-cy;"
+            "var primary=0,secondary=0;"
+            "if(dir==='up'){primary=-dy;secondary=Math.abs(dx);}"
+            "if(dir==='down'){primary=dy;secondary=Math.abs(dx);}"
+            "if(dir==='left'){primary=-dx;secondary=Math.abs(dy);}"
+            "if(dir==='right'){primary=dx;secondary=Math.abs(dy);}"
+            "if(primary<8){return;}"
+            "var score=secondary*2+primary;"
+            "if(score<bestScore){bestScore=score;best=el;}"
+            "});"
+            "if(!best){"
+            "var amountY=dir==='up'?-160:dir==='down'?160:0;"
+            "var amountX=dir==='left'?-160:dir==='right'?160:0;"
+            "window.scrollBy(amountX,amountY);"
+            "return 'scroll';"
+            "}"
+            "try{best.focus();}catch(error){}"
+            "try{best.scrollIntoView({block:'nearest',inline:'nearest'});}catch(error){}"
+            "return 'focus';"
+            "})();", direction];
+}
+
+- (void)browserRemoteInputControllerMoveFocusInDirection:(NSString *)direction {
+    if (self.webview == nil || direction.length == 0) {
+        return;
+    }
+    [self.webview stringByEvaluatingJavaScriptFromString:[self browserFocusScriptForDirection:direction]];
+}
+
+- (void)activateFocusedPageElement {
+    if (self.webview == nil) {
+        return;
+    }
+    NSString *pointString = [self.webview stringByEvaluatingJavaScriptFromString:
+                             @"(function(){"
+                             "var selector='a[href],button,input,textarea,select,summary,[contenteditable=\"true\"],[role=\"button\"],[role=\"link\"],[tabindex]:not([tabindex=\"-1\"])';"
+                             "function visible(el){"
+                             "if(!el||el.disabled){return false;}"
+                             "var style=window.getComputedStyle(el);"
+                             "if(style.display==='none'||style.visibility==='hidden'){return false;}"
+                             "var r=el.getBoundingClientRect();"
+                             "return r.width>=2&&r.height>=2&&r.bottom>0&&r.top<window.innerHeight&&r.right>0&&r.left<window.innerWidth;"
+                             "}"
+                             "var el=document.activeElement;"
+                             "var usable=el&&el!==document.body&&el!==document.documentElement&&visible(el);"
+                             "if(!usable){"
+                             "var nodes=Array.prototype.filter.call(document.querySelectorAll(selector),visible);"
+                             "var cx=window.innerWidth/2,cy=window.innerHeight/2,best=null,bestDistance=Infinity;"
+                             "nodes.forEach(function(node){"
+                             "var r=node.getBoundingClientRect();"
+                             "var distance=Math.hypot((r.left+r.width/2)-cx,(r.top+r.height/2)-cy);"
+                             "if(distance<bestDistance){bestDistance=distance;best=node;}"
+                             "});"
+                             "el=best;"
+                             "if(el){try{el.focus();}catch(error){}}"
+                             "}"
+                             "if(!el){return '';}"
+                             "var rect=el.getBoundingClientRect();"
+                             "return Math.round(rect.left+rect.width/2)+','+Math.round(rect.top+rect.height/2);"
+                             "})();"];
+    NSArray<NSString *> *parts = [pointString componentsSeparatedByString:@","];
+    if (parts.count != 2) {
+        return;
+    }
+    CGPoint domPoint = CGPointMake(parts[0].doubleValue, parts[1].doubleValue);
+    [self.pageActionCoordinator handlePageSelectionAtDOMPoint:domPoint webView:self.webview];
+}
+
+- (void)browserRemoteInputControllerActivateFocusedElement {
+    [self activateFocusedPageElement];
+}
+
+- (NSString *)browserJavaScriptLiteralForText:(NSString *)text {
+    NSString *escaped = [text stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+    escaped = [escaped stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
+    escaped = [escaped stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"];
+    escaped = [escaped stringByReplacingOccurrencesOfString:@"\r" withString:@"\\r"];
+    return [NSString stringWithFormat:@"'%@'", escaped];
+}
+
+- (void)browserRemoteInputControllerInsertText:(NSString *)text {
+    if (self.webview == nil || text.length == 0) {
+        return;
+    }
+    NSString *literal = [self browserJavaScriptLiteralForText:text];
+    NSString *script = [NSString stringWithFormat:
+                        @"(function(){"
+                        "var el=document.activeElement;"
+                        "if(!el||el===document.body||el===document.documentElement){return;}"
+                        "var value=%@;"
+                        "try{el.dispatchEvent(new KeyboardEvent('keydown',{key:value,bubbles:true}));}catch(error){}"
+                        "if(el.isContentEditable){document.execCommand('insertText',false,value);return;}"
+                        "var tag=(el.tagName||'').toLowerCase();"
+                        "if(tag!=='input'&&tag!=='textarea'){return;}"
+                        "var start=el.selectionStart==null?el.value.length:el.selectionStart;"
+                        "var end=el.selectionEnd==null?el.value.length:el.selectionEnd;"
+                        "el.value=el.value.slice(0,start)+value+el.value.slice(end);"
+                        "var caret=start+value.length;"
+                        "try{el.selectionStart=el.selectionEnd=caret;}catch(error){}"
+                        "el.dispatchEvent(new Event('input',{bubbles:true}));"
+                        "})();", literal];
+    [self.webview stringByEvaluatingJavaScriptFromString:script];
+}
+
+- (void)browserRemoteInputControllerDeleteBackward {
+    if (self.webview == nil) {
+        return;
+    }
+    [self.webview stringByEvaluatingJavaScriptFromString:
+     @"(function(){"
+     "var el=document.activeElement;"
+     "if(!el||el===document.body||el===document.documentElement){return;}"
+     "try{el.dispatchEvent(new KeyboardEvent('keydown',{key:'Backspace',bubbles:true}));}catch(error){}"
+     "if(el.isContentEditable){document.execCommand('delete',false);return;}"
+     "var tag=(el.tagName||'').toLowerCase();"
+     "if(tag!=='input'&&tag!=='textarea'){return;}"
+     "var start=el.selectionStart==null?el.value.length:el.selectionStart;"
+     "var end=el.selectionEnd==null?el.value.length:el.selectionEnd;"
+     "if(start===end&&start>0){start-=1;}"
+     "el.value=el.value.slice(0,start)+el.value.slice(end);"
+     "try{el.selectionStart=el.selectionEnd=start;}catch(error){}"
+     "el.dispatchEvent(new Event('input',{bubbles:true}));"
+     "})();"];
 }
 
 #pragma mark - BrowserWebViewDelegate
@@ -729,6 +1152,14 @@ static UIColor *kTextColor(void) {
 
 - (void)webViewDidFinishLoad:(id)webView {
     [self.tabCoordinator webViewDidFinishLoad:webView];
+    if (webView == self.webview) {
+        [self syncPageVideoState];
+        if ((CACurrentMediaTime() - self.lastPageClickTimestamp) < 20.0) {
+            // The click opened this page: if its main video starts playing, take it full screen.
+            [self.webview evaluateJavaScriptWithoutWaiting:@"window.__tvb&&window.__tvb.arm(-1,-1,8000);"];
+            [self schedulePageVideoStateChecks];
+        }
+    }
     if (self.tabOverviewController.visible) {
         BrowserTabViewModel *tab = [self.tabCoordinator tabForWebView:webView];
         NSInteger tabIndex = tab != nil ? [self.viewModel.tabs indexOfObject:tab] : NSNotFound;
@@ -805,7 +1236,9 @@ static UIColor *kTextColor(void) {
 #pragma mark - Presses / Touches
 
 - (void)pressesBegan:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
-    [self.remoteInputController handlePressesBegan:presses withEvent:event];
+    if ([self.remoteInputController handlePressesBegan:presses withEvent:event]) {
+        return;
+    }
     [super pressesBegan:presses withEvent:event];
 }
 
@@ -814,6 +1247,11 @@ static UIColor *kTextColor(void) {
         return;
     }
     [super pressesEnded:presses withEvent:event];
+}
+
+- (void)pressesCancelled:(NSSet<UIPress *> *)presses withEvent:(UIPressesEvent *)event {
+    [self.remoteInputController handlePressesCancelled:presses withEvent:event];
+    [super pressesCancelled:presses withEvent:event];
 }
 
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {

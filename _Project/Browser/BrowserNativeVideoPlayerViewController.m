@@ -87,10 +87,7 @@ static NSString *BrowserNativePlayerPressPhaseString(UIPressPhase phase) {
         if (self.requestCookies.count > 0) {
             assetOptions[@"AVURLAssetHTTPCookiesKey"] = self.requestCookies;
         }
-        self.assetLoader = [[BrowserNativeVideoAssetLoader alloc] initWithRequestHeaders:self.requestHeaders cookies:self.requestCookies];
-        NSURL *assetURL = [self.assetLoader assetURLForPlaybackURL:self.videoURL];
-        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:assetURL options:assetOptions];
-        [self.assetLoader attachToAsset:asset];
+        AVURLAsset *asset = [AVURLAsset URLAssetWithURL:self.videoURL options:assetOptions];
         playerItem = [AVPlayerItem playerItemWithAsset:asset];
         [self log:@"using request headers %@ cookies=%lu", self.requestHeaders, (unsigned long)self.requestCookies.count];
     } else {
@@ -147,6 +144,14 @@ static NSString *BrowserNativePlayerPressPhaseString(UIPressPhase phase) {
         [self.player pause];
     } else {
         [self log:@"toggle play"];
+        [self.player play];
+    }
+}
+
+- (void)skipByIntervalAndContinue:(NSTimeInterval)delta {
+    BOOL wasPlaying = self.player.rate > 0.0;
+    [self skipByInterval:delta];
+    if (wasPlaying) {
         [self.player play];
     }
 }

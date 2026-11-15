@@ -510,6 +510,109 @@ withAnimationCoordinator:(UIFocusAnimationCoordinator *)coordinator {
     [[self.host browserWebView] loadRequest:request];
 }
 
+- (NSString *)normalizedHostForURLString:(NSString *)URLString {
+    NSURL *URL = [NSURL URLWithString:URLString];
+    NSString *host = URL.host.lowercaseString;
+    if ([host hasPrefix:@"www."]) {
+        host = [host substringFromIndex:4];
+    }
+    return host ?: @"";
+}
+
+- (NSString *)currentPageDomainHost {
+    return [self normalizedHostForURLString:self.host.browserWebView.request.URL.absoluteString];
+}
+
+- (NSString *)currentPageDomainURLString {
+    NSURL *URL = self.host.browserWebView.request.URL;
+    NSString *host = URL.host;
+    if (host.length == 0) {
+        return @"";
+    }
+    NSString *scheme = URL.scheme.length > 0 ? URL.scheme : @"https";
+    return [NSString stringWithFormat:@"%@://%@", scheme, host];
+}
+
+- (NSInteger)favoriteIndexMatchingHost:(NSString *)host {
+    if (host.length == 0) {
+        return NSNotFound;
+    }
+    NSArray *favorites = [[NSUserDefaults standardUserDefaults] arrayForKey:@"FAVORITES"];
+    __block NSInteger matchedIndex = NSNotFound;
+    [favorites enumerateObjectsUsingBlock:^(NSArray *entry, NSUInteger index, BOOL *stop) {
+        NSString *URLString = entry.count > 0 ? entry[0] : @"";
+        if ([[self normalizedHostForURLString:URLString] isEqualToString:host]) {
+            matchedIndex = (NSInteger)index;
+            *stop = YES;
+        }
+    }];
+    return matchedIndex;
+}
+
+- (void)addCurrentDomainToFavorites {
+    NSString *host = [self currentPageDomainHost];
+    NSString *URLString = [self currentPageDomainURLString];
+    if (host.length == 0 || URLString.length == 0 || [self favoriteIndexMatchingHost:host] != NSNotFound) {
+        return;
+    }
+
+    NSMutableArray *favorites = [[[NSUserDefaults standardUserDefaults] arrayForKey:@"FAVORITES"] mutableCopy];
+    if (favorites == nil) {
+        favorites = [NSMutableArray array];
+    }
+    [favorites addObject:@[URLString, host]];
+    [self saveFavoritesArray:favorites];
+}
+
+- (void)removeCurrentDomainFromFavorites {
+    NSInteger matchedIndex = [self favoriteIndexMatchingHost:[self currentPageDomainHost]];
+    if (matchedIndex == NSNotFound) {
+        return;
+    }
+    NSMutableArray *favorites = [[[NSUserDefaults standardUserDefaults] arrayForKey:@"FAVORITES"] mutableCopy];
+    if (matchedIndex < 0 || matchedIndex >= (NSInteger)favorites.count) {
+        return;
+    }
+    [favorites removeObjectAtIndex:(NSUInteger)matchedIndex];
+    [self saveFavoritesArray:favorites];
+}
+
+- (BrowserAdvancedMenuItem *)addCurrentDomainFavoriteMenuItem {
+    return [self advancedMenuItemWithTitle:@"Add Favorite"
+                                     style:UIAlertActionStyleDefault
+                                   handler:^{
+        [self addCurrentDomainToFavorites];
+    }];
+}
+
+- (BrowserAdvancedMenuItem *)removeCurrentDomainFavoriteMenuItem {
+    return [self advancedMenuItemWithTitle:@"Remove Favorite"
+                                     style:UIAlertActionStyleDestructive
+                                   handler:^{
+        [self removeCurrentDomainFromFavorites];
+    }];
+}
+
+- (NSArray<BrowserAdvancedMenuItem *> *)favoriteLinkMenuItems {
+    NSArray *favorites = [[NSUserDefaults standardUserDefaults] arrayForKey:@"FAVORITES"];
+    NSMutableArray<BrowserAdvancedMenuItem *> *items = [NSMutableArray array];
+    for (NSArray *entry in favorites) {
+        NSString *URLString = entry.count > 0 ? entry[0] : @"";
+        NSString *title = entry.count > 1 ? entry[1] : @"";
+        NSString *favoriteURL = [URLString copy];
+        NSString *displayTitle = [self displayTitleForStoredTitle:title URLString:favoriteURL includeURL:NO];
+        if (![self stringHasVisibleContent:displayTitle] || ![self stringHasVisibleContent:favoriteURL]) {
+            continue;
+        }
+        [items addObject:[self advancedMenuItemWithTitle:displayTitle
+                                                   style:UIAlertActionStyleDefault
+                                                 handler:^{
+            [self loadStoredURLString:favoriteURL];
+        }]];
+    }
+    return items;
+}
+
 - (void)saveFavoritesArray:(NSArray *)favorites {
     [[NSUserDefaults standardUserDefaults] setObject:favorites forKey:@"FAVORITES"];
     [[NSUserDefaults standardUserDefaults] synchronize];
@@ -935,19 +1038,39 @@ withAnimationCoordinator:(UIFocusAnimationCoordinator *)coordinator {
     }];
 }
 
-- (BrowserAdvancedMenuItem *)showTabsMenuItem {
-    return [self advancedMenuItemWithTitle:@"Show Tabs"
+- (BrowserAdvancedMenuItem *)previousPageMenuItem {
+    return [self advancedMenuItemWithTitle:@"Previous Page"
                                      style:UIAlertActionStyleDefault
                                    handler:^{
-        [self.host browserShowTabOverview];
+        BrowserWebView *webView = self.host.browserWebView;
+        if (webView.canGoBack) {
+            [webView goBack];
+        }
     }];
 }
 
-- (BrowserAdvancedMenuItem *)newTabMenuItem {
-    return [self advancedMenuItemWithTitle:@"Open New Tab"
+- (BrowserAdvancedMenuItem *)fullScreenMenuItem {
+    BOOL fullScreen = !self.host.browserTopMenuShowing;
+    NSString *title = fullScreen ? @"Exit Full Screen" : @"Full Screen";
+    return [self advancedMenuItemWithTitle:title
                                      style:UIAlertActionStyleDefault
                                    handler:^{
-        [self.host browserCreateNewTabLoadingHomePage:YES];
+        if (self.host.browserTopMenuShowing) {
+            [self.host browserHideTopNav];
+        } else {
+            [self.host browserShowTopNav];
+        }
+    }];
+}
+
+- (BrowserAdvancedMenuItem *)nextPageMenuItem {
+    return [self advancedMenuItemWithTitle:@"Next Page"
+                                     style:UIAlertActionStyleDefault
+                                   handler:^{
+        BrowserWebView *webView = self.host.browserWebView;
+        if (webView.canGoForward) {
+            [webView goForward];
+        }
     }];
 }
 
@@ -1057,8 +1180,8 @@ withAnimationCoordinator:(UIFocusAnimationCoordinator *)coordinator {
             [self setCurrentPageAsHomePageMenuItem],
             [self favoritesMenuItem],
             [self historyMenuItem],
-            [self showTabsMenuItem],
-            [self newTabMenuItem],
+            [self previousPageMenuItem],
+            [self nextPageMenuItem],
         ]],
         [BrowserAdvancedMenuSection sectionWithTitle:@"Appearance"
                                                items:@[

@@ -7,7 +7,7 @@
 //
 
 #import <UIKit/UIKit.h>
-#import <GameKit/GameKit.h>
+#import <GameController/GameController.h>
 
 #import "BrowserWebView.h"
 #import "BrowserTopBarView.h"
@@ -16,5 +16,7 @@
 
 @property (nonatomic, retain) IBOutlet BrowserTopBarView *topMenuView;
 @property (nonatomic, retain) IBOutlet UIView *browserContainerView;
+
+- (BOOL)browserFullscreenVideoActive;
 
 @end

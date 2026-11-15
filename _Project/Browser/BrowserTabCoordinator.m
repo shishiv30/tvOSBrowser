@@ -459,6 +459,13 @@ static CGFloat const kThumbnailStagingOffset = 4096.0;
 }
 
 - (void)createNewTabLoadingHomePage:(BOOL)loadHomePage {
+    if (self.viewModel.tabs.count > 0) {
+        if (loadHomePage) {
+            [self loadHomePage];
+        }
+        return;
+    }
+
     BrowserTabViewModel *tab = [self.viewModel addTab];
     if (tab == nil) {
         [self showMaxTabsAlert];
@@ -481,16 +488,15 @@ static CGFloat const kThumbnailStagingOffset = 4096.0;
         return NO;
     }
 
-    [self captureSnapshotForTab:self.activeTab];
-    if ([self.viewModel addTab] == nil) {
-        [self showMaxTabsAlert];
+    if (self.viewModel.tabs.count == 0) {
+        [self createNewTabLoadingHomePage:NO];
+    }
+    if (self.activeWebView == nil) {
         return NO;
     }
 
-    [self initWebView];
-    [self refreshActiveTabUI];
-    [self.rootView bringSubviewToFront:self.cursorView];
     [self.activeWebView loadRequest:request];
+    [self refreshActiveTabUI];
     [self persistSession];
     return YES;
 }

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gamepad Test</title>
+<style>
+    :root {
+        --bg: #101318; --panel: #1a1f27; --line: #2b3340; --text: #e8edf3; --dim: #8d99a8;
+        --on: #37c871; --warn: #ffb020; --bad: #ff5a5a; --accent: #4aa3ff;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; background: var(--bg); color: var(--text); }
+    body { font: 26px/1.35 -apple-system, "PingFang SC", "Helvetica Neue", sans-serif; padding: 36px 56px; }
+    h1 { font-size: 40px; margin: 0 0 6px; }
+    h2 { font-size: 28px; margin: 0 0 14px; color: var(--dim); font-weight: 600; }
+    #status { font-size: 28px; padding: 14px 22px; border-radius: 14px; background: var(--panel); border: 2px solid var(--line); margin: 14px 0 24px; }
+    #status.on { border-color: var(--on); }
+    #status.off { border-color: var(--warn); }
+    .columns { display: grid; grid-template-columns: 1.15fr 1fr; gap: 28px; }
+    .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 22px 26px; margin-bottom: 26px; }
+    .buttons { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+    .button { border: 2px solid var(--line); border-radius: 12px; padding: 10px 6px; text-align: center; min-height: 92px; }
+    .button .index { font-size: 18px; color: var(--dim); }
+    .button .name { font-size: 26px; font-weight: 700; white-space: nowrap; overflow: hidden; }
+    .button .value { font-size: 18px; color: var(--dim); font-variant-numeric: tabular-nums; }
+    .button.down { background: var(--on); border-color: var(--on); color: #06210f; }
+    .button.down .index, .button.down .value { color: #0c3a1c; }
+    .sticks { display: flex; gap: 40px; align-items: center; }
+    .stick { width: 190px; height: 190px; border-radius: 50%; border: 2px solid var(--line); position: relative; flex: none; }
+    .stick i { position: absolute; width: 26px; height: 26px; margin: -13px 0 0 -13px; border-radius: 50%; background: var(--accent); left: 50%; top: 50%; }
+    .axes { font-size: 22px; color: var(--dim); font-variant-numeric: tabular-nums; }
+    table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+    th, td { padding: 9px 8px; text-align: right; border-bottom: 1px solid var(--line); }
+    th:first-child, td:first-child { text-align: left; }
+    th { font-size: 20px; color: var(--dim); font-weight: 600; }
+    tr.bad td { color: var(--bad); font-weight: 700; }
+    .verdict { margin-top: 14px; font-size: 24px; }
+    .ok { color: var(--on); } .bad { color: var(--bad); }
+    .note { font-size: 21px; color: var(--dim); margin-top: 12px; }
+    #log { font: 20px/1.45 ui-monospace, Menlo, monospace; color: var(--dim); height: 300px; overflow: hidden; white-space: pre; }
+</style>
+</head>
+<body>
+<h1>Gamepad Test</h1>
+<div id="status" class="off">Game Mode is off. Hold − (Create on PS5, View on Xbox) for 0.7 seconds to turn it on.</div>
+
+<div class="columns">
+    <div>
+        <div class="panel">
+            <h2 id="pad-name">Buttons</h2>
+            <div class="buttons" id="buttons"></div>
+        </div>
+        <div class="panel">
+            <h2>Sticks</h2>
+            <div class="sticks">
+                <div class="stick"><i id="stick-left"></i></div>
+                <div class="stick"><i id="stick-right"></i></div>
+                <div class="axes" id="axes"></div>
+            </div>
+        </div>
+    </div>
+    <div>
+        <div class="panel">
+            <h2>D-pad Loss Check</h2>
+            <table>
+                <thead><tr><th>Direction</th><th>① Reported by controller</th><th>② Delivered to page</th><th>③ Read by page</th></tr></thead>
+                <tbody id="dpad-rows"></tbody>
+            </table>
+            <div class="verdict" id="verdict"></div>
+            <div class="note">
+                Press each direction a fixed number of times (for example 20), then compare the three columns.<br>
+                ① lower than your press count: the signal was lost in the controller / Bluetooth / system stage, so the browser never received it.<br>
+                ② lower than ①, or ③ lower than ②: the loss happened inside the browser.<br>
+                Press L3 + R3 together to reset the counts.
+            </div>
+        </div>
+        <div class="panel">
+            <h2>All buttons: delivered to page <span id="total-delivered">0</span> times, read by page <span id="total-seen">0</span> times, recovered by latch <span id="total-latched">0</span> times</h2>
+            <div id="log"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    var LABELS = {
+        nintendo: ['B', 'A', 'Y', 'X', 'L', 'R', 'ZL', 'ZR', '−', '+', 'L3', 'R3', '↑', '↓', '←', '→', 'Home'],
+        playstation: ['✕', '○', '□', '△', 'L1', 'R1', 'L2', 'R2', 'Create', 'Options', 'L3', 'R3', '↑', '↓', '←', '→', 'PS', 'Touchpad'],
+        xbox: ['A', 'B', 'X', 'Y', 'LB', 'RB', 'LT', 'RT', 'View', 'Menu', 'L3', 'R3', '↑', '↓', '←', '→', 'Xbox'],
+        generic: ['Down', 'Right', 'Left', 'Up', 'L1', 'R1', 'L2', 'R2', 'Select', 'Start', 'L3', 'R3', '↑', '↓', '←', '→', 'Home']
+    };
+    var DPAD = [['Up ↑', 12], ['Down ↓', 13], ['Left ←', 14], ['Right →', 15]];
+
+    function byId(id) { return document.getElementById(id); }
+    function kindOf(id) {
+        if (/057e|pro controller|nintendo|joy-con/i.test(id)) { return 'nintendo'; }
+        if (/054c|dualsense|dualshock|playstation/i.test(id)) { return 'playstation'; }
+        if (/045e|xbox/i.test(id)) { return 'xbox'; }
+        return 'generic';
+    }
+
+    var buttonCells = [];
+    var builtFor = '';
+    function buildButtons(pad) {
+        var key = pad.id + '/' + pad.buttons.length;
+        if (key === builtFor) { return; }
+        builtFor = key;
+        var labels = LABELS[kindOf(pad.id)];
+        var container = byId('buttons');
+        container.innerHTML = '';
+        buttonCells = [];
+        for (var i = 0; i < pad.buttons.length; i++) {
+            var cell = document.createElement('div');
+            cell.className = 'button';
+            cell.innerHTML = '<div class="index">' + i + '</div><div class="name"></div><div class="value">0</div>';
+            cell.children[1].textContent = labels[i] || ('B' + i);
+            container.appendChild(cell);
+            buttonCells.push(cell);
+        }
+        byId('pad-name').textContent = pad.id.replace(/\s*\(.*$/, '') + ' (' + pad.mapping + ', ' + pad.buttons.length + ' buttons)';
+    }
+
+    var rows = [];
+    DPAD.forEach(function (entry) {
+        var row = document.createElement('tr');
+        row.innerHTML = '<td></td><td>0</td><td>0</td><td>0</td>';
+        row.children[0].textContent = entry[0];
+        byId('dpad-rows').appendChild(row);
+        rows.push(row);
+    });
+
+    var seen = [];            // presses this page observed by reading the Gamepad API once per frame
+    var wasDown = [];
+    var base = { native: [0, 0, 0, 0], down: [], latched: 0 };
+    var log = [];
+    var resetArmed = true;
+
+    function stats() {
+        var agent = window.__tvb;
+        return agent && agent.padStats ? agent.padStats : { updates: 0, down: [], latched: 0, native: [0, 0, 0, 0] };
+    }
+
+    function reset() {
+        var current = stats();
+        base = { native: current.native.slice(), down: current.down.slice(), latched: current.latched };
+        seen = [];
+        log = [];
+    }
+
+    function addLog(text) {
+        var time = (performance.now() / 1000).toFixed(3);
+        log.push(time + 's  ' + text);
+        if (log.length > 9) { log.shift(); }
+    }
+
+    function frame() {
+        requestAnimationFrame(frame);
+        var pad = navigator.getGamepads ? navigator.getGamepads()[0] : null;
+        var status = byId('status');
+        if (!pad) {
+            status.className = 'off';
+            status.textContent = 'Game Mode is off. Hold − (Create on PS5, View on Xbox) for 0.7 seconds to turn it on.';
+            wasDown = [];
+            return;
+        }
+        status.className = 'on';
+        status.textContent = 'Game Mode is on. Controller input is being delivered to the page. Hold the same button again to return to the browser.';
+        buildButtons(pad);
+        var labels = LABELS[kindOf(pad.id)];
+
+        for (var i = 0; i < pad.buttons.length; i++) {
+            var button = pad.buttons[i];
+            var cell = buttonCells[i];
+            cell.classList.toggle('down', button.pressed);
+            cell.children[2].textContent = button.value.toFixed(2);
+            if (button.pressed && !wasDown[i]) {
+                seen[i] = (seen[i] || 0) + 1;
+                addLog('Pressed ' + i + ' ' + (labels[i] || ''));
+            } else if (!button.pressed && wasDown[i]) {
+                addLog('Released ' + i + ' ' + (labels[i] || ''));
+            }
+            wasDown[i] = button.pressed;
+        }
+
+        var both = pad.buttons[10] && pad.buttons[11] && pad.buttons[10].pressed && pad.buttons[11].pressed;
+        if (both && resetArmed) { reset(); }
+        resetArmed = !both;
+
+        byId('stick-left').style.transform = 'translate(' + (pad.axes[0] * 82) + 'px,' + (pad.axes[1] * 82) + 'px)';
+        byId('stick-right').style.transform = 'translate(' + (pad.axes[2] * 82) + 'px,' + (pad.axes[3] * 82) + 'px)';
+        byId('axes').innerHTML = 'Left X ' + pad.axes[0].toFixed(3) + '<br>Left Y ' + pad.axes[1].toFixed(3) +
+            '<br>Right X ' + pad.axes[2].toFixed(3) + '<br>Right Y ' + pad.axes[3].toFixed(3);
+
+        var current = stats();
+        var lostInBrowser = false;
+        DPAD.forEach(function (entry, index) {
+            var native = current.native[index] - (base.native[index] || 0);
+            var delivered = (current.down[entry[1]] || 0) - (base.down[entry[1]] || 0);
+            var observed = seen[entry[1]] || 0;
+            rows[index].children[1].textContent = native;
+            rows[index].children[2].textContent = delivered;
+            rows[index].children[3].textContent = observed;
+            var bad = delivered < native || observed < delivered;
+            rows[index].className = bad ? 'bad' : '';
+            lostInBrowser = lostInBrowser || bad;
+        });
+        var verdict = byId('verdict');
+        verdict.className = 'verdict ' + (lostInBrowser ? 'bad' : 'ok');
+        verdict.textContent = lostInBrowser ? 'Columns disagree: the browser is losing input.' : 'Columns agree: the browser is not losing D-pad input.';
+
+        var totalDelivered = 0, totalSeen = 0;
+        for (var j = 0; j < pad.buttons.length; j++) {
+            totalDelivered += (current.down[j] || 0) - (base.down[j] || 0);
+            totalSeen += seen[j] || 0;
+        }
+        byId('total-delivered').textContent = totalDelivered;
+        byId('total-seen').textContent = totalSeen;
+        byId('total-latched').textContent = current.latched - base.latched;
+        byId('log').textContent = log.join('\n');
+    }
+    requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

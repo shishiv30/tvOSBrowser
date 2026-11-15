@@ -483,6 +483,200 @@ static void BrowserInstallYouTubeCaptureUserScript(id configuration) {
     }
 }
 
+#pragma mark - Page agent, script bridge and ad blocking
+
+NSString * const BrowserAdBlockDisabledDefaultsKey = @"AdBlockDisabled";
+static NSString * const kBrowserAgentMessageHandlerName = @"tvb";
+static NSString * const kBrowserAdBlockRuleListIdentifier = @"BrowserAdBlockRules-v1";
+
+static id BrowserUserContentControllerForConfiguration(id configuration) {
+    if (configuration == nil) {
+        return nil;
+    }
+    SEL getter = NSSelectorFromString(@"userContentController");
+    SEL setter = NSSelectorFromString(@"setUserContentController:");
+    id userContentController = nil;
+    if ([configuration respondsToSelector:getter]) {
+        userContentController = ((id (*)(id, SEL))objc_msgSend)(configuration, getter);
+    }
+    Class userContentControllerClass = NSClassFromString(kBrowserUserContentControllerClassName);
+    if (userContentController == nil && userContentControllerClass != Nil && [configuration respondsToSelector:setter]) {
+        userContentController = ((id (*)(id, SEL))objc_msgSend)((id)userContentControllerClass, @selector(new));
+        ((void (*)(id, SEL, id))objc_msgSend)(configuration, setter, userContentController);
+    }
+    return userContentController;
+}
+
+static void BrowserAddUserScript(id userContentController, NSString *source, BOOL forMainFrameOnly) {
+    Class userScriptClass = NSClassFromString(kBrowserUserScriptClassName);
+    SEL addUserScriptSelector = NSSelectorFromString(@"addUserScript:");
+    SEL initializer = NSSelectorFromString(@"initWithSource:injectionTime:forMainFrameOnly:");
+    if (source.length == 0 || userScriptClass == Nil ||
+        ![userContentController respondsToSelector:addUserScriptSelector] ||
+        ![userScriptClass instancesRespondToSelector:initializer]) {
+        return;
+    }
+    id userScript = ((id (*)(id, SEL))objc_msgSend)((id)userScriptClass, @selector(alloc));
+    userScript = ((id (*)(id, SEL, id, NSInteger, BOOL))objc_msgSend)(userScript, initializer, source, 0, forMainFrameOnly);
+    if (userScript != nil) {
+        ((void (*)(id, SEL, id))objc_msgSend)(userContentController, addUserScriptSelector, userScript);
+    }
+}
+
+static NSString *BrowserPageAgentScript(void) {
+    static NSString *script;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSString *path = [[NSBundle mainBundle] pathForResource:@"BrowserPageAgent" ofType:@"js"];
+        script = path.length > 0 ? [NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL] : nil;
+        if (script.length == 0) {
+            NSLog(@"[PageAgent] BrowserPageAgent.js is missing from the app bundle");
+        }
+    });
+    return script;
+}
+
+// WKUserContentController retains its message handlers, so the web view is reached through a weak proxy.
+@interface BrowserScriptMessageProxy : NSObject
+@property (nonatomic, weak) id target;
+@end
+
+@implementation BrowserScriptMessageProxy
+
+- (void)userContentController:(id)userContentController didReceiveScriptMessage:(id)message {
+    (void)userContentController;
+    SEL selector = NSSelectorFromString(@"browser_handleAgentMessage:");
+    if ([self.target respondsToSelector:selector]) {
+        ((void (*)(id, SEL, id))objc_msgSend)(self.target, selector, message);
+    }
+}
+
+@end
+
+static NSArray<NSString *> *BrowserAdBlockDomains(void) {
+    return @[
+        @"doubleclick.net", @"googlesyndication.com", @"googleadservices.com", @"adservice.google.com",
+        @"googletagservices.com", @"amazon-adsystem.com", @"adnxs.com", @"taboola.com", @"outbrain.com",
+        @"criteo.com", @"criteo.net", @"pubmatic.com", @"rubiconproject.com", @"openx.net", @"moatads.com",
+        @"adsrvr.org", @"scorecardresearch.com", @"popads.net", @"popcash.net", @"propellerads.com",
+        @"exoclick.com", @"exosrv.com", @"juicyads.com", @"adsterra.com", @"trafficjunky.net", @"mgid.com",
+        @"revcontent.com", @"zedo.com", @"smartadserver.com", @"advertising.com", @"adcolony.com",
+        @"bidswitch.net", @"casalemedia.com", @"yieldmo.com", @"teads.tv", @"adform.net", @"media.net",
+        @"onclickads.net", @"hilltopads.net", @"adcash.com", @"clickadu.com", @"tsyndicate.com",
+        @"pos.baidu.com", @"cpro.baidu.com", @"cbjs.baidu.com", @"dup.baidustatic.com", @"tanx.com",
+        @"alimama.com", @"gdt.qq.com", @"e.qq.com", @"pangolin-sdk-toutiao.com", @"ad.toutiao.com",
+        @"cnzz.com", @"union.sogou.com", @"static-mozo.com", @"mediav.com", @"admaster.com.cn",
+    ];
+}
+
+static NSString *BrowserAdBlockEncodedRules(void) {
+    NSMutableArray<NSDictionary *> *rules = [NSMutableArray array];
+    for (NSString *domain in BrowserAdBlockDomains()) {
+        NSString *escaped = [domain stringByReplacingOccurrencesOfString:@"." withString:@"\\."];
+        NSString *filter = [NSString stringWithFormat:@"^[^:]+://+([^:/]+\\.)?%@[:/]", escaped];
+        [rules addObject:@{
+            @"trigger": @{@"url-filter": filter, @"load-type": @[@"third-party"]},
+            @"action": @{@"type": @"block"},
+        }];
+    }
+    NSString *selector = @"ins.adsbygoogle, iframe[id^='google_ads_iframe'], div[id^='google_ads_'], div[id^='div-gpt-ad'], "
+                          "iframe[src*='doubleclick.net'], iframe[src*='googlesyndication.com'], iframe[src*='pos.baidu.com'], "
+                          "div[id^='taboola-'], div.OUTBRAIN, [id^='BAIDU_SSP_'], [class*='adsbygoogle']";
+    [rules addObject:@{
+        @"trigger": @{@"url-filter": @".*"},
+        @"action": @{@"type": @"css-display-none", @"selector": selector},
+    }];
+    NSData *data = [NSJSONSerialization dataWithJSONObject:rules options:0 error:NULL];
+    return data != nil ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+}
+
+static id sBrowserAdBlockRuleList;
+static BOOL sBrowserAdBlockCompiling;
+
+static NSHashTable *BrowserAdBlockControllers(void) {
+    static NSHashTable *controllers;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        controllers = [NSHashTable weakObjectsHashTable];
+    });
+    return controllers;
+}
+
+static void BrowserApplyAdBlockToController(id userContentController) {
+    SEL removeSelector = NSSelectorFromString(@"removeAllContentRuleLists");
+    SEL addSelector = NSSelectorFromString(@"addContentRuleList:");
+    if (![userContentController respondsToSelector:removeSelector] || ![userContentController respondsToSelector:addSelector]) {
+        return;
+    }
+    ((void (*)(id, SEL))objc_msgSend)(userContentController, removeSelector);
+    BOOL enabled = ![[NSUserDefaults standardUserDefaults] boolForKey:BrowserAdBlockDisabledDefaultsKey];
+    if (enabled && sBrowserAdBlockRuleList != nil) {
+        ((void (*)(id, SEL, id))objc_msgSend)(userContentController, addSelector, sBrowserAdBlockRuleList);
+    }
+}
+
+static void BrowserApplyAdBlockToAllControllers(void) {
+    for (id userContentController in BrowserAdBlockControllers().allObjects) {
+        BrowserApplyAdBlockToController(userContentController);
+    }
+}
+
+static void BrowserCompileAdBlockRulesIfNeeded(void) {
+    if (sBrowserAdBlockRuleList != nil || sBrowserAdBlockCompiling) {
+        return;
+    }
+    Class storeClass = NSClassFromString(@"WKContentRuleListStore");
+    SEL defaultStoreSelector = NSSelectorFromString(@"defaultStore");
+    SEL compileSelector = NSSelectorFromString(@"compileContentRuleListForIdentifier:encodedContentRules:completionHandler:");
+    NSString *encodedRules = BrowserAdBlockEncodedRules();
+    if (storeClass == Nil || encodedRules.length == 0 || ![storeClass respondsToSelector:defaultStoreSelector]) {
+        NSLog(@"[AdBlock] content rule lists are unavailable on this runtime");
+        return;
+    }
+    id store = ((id (*)(id, SEL))objc_msgSend)((id)storeClass, defaultStoreSelector);
+    if (![store respondsToSelector:compileSelector]) {
+        NSLog(@"[AdBlock] content rule list store cannot compile rules");
+        return;
+    }
+    sBrowserAdBlockCompiling = YES;
+    ((void (*)(id, SEL, id, id, id))objc_msgSend)(store, compileSelector, kBrowserAdBlockRuleListIdentifier, encodedRules, ^(id ruleList, NSError *error) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            sBrowserAdBlockCompiling = NO;
+            if (ruleList == nil) {
+                NSLog(@"[AdBlock] rule compilation failed: %@", error);
+                return;
+            }
+            sBrowserAdBlockRuleList = ruleList;
+            BrowserApplyAdBlockToAllControllers();
+        });
+    });
+}
+
+static void BrowserInstallAdBlock(id userContentController) {
+    if (userContentController == nil) {
+        return;
+    }
+    [BrowserAdBlockControllers() addObject:userContentController];
+    BrowserApplyAdBlockToController(userContentController);
+    BrowserCompileAdBlockRulesIfNeeded();
+}
+
+// tvbrowser://gamepad-test -> GamepadTest.html in the bundle. A file URL saved from an earlier install
+// (the bundle path changes on every install) is mapped to the current bundle the same way.
+static NSURL *BrowserBuiltInPageURL(NSURL *URL) {
+    NSDictionary<NSString *, NSString *> *pages = @{@"gamepad-test": @"GamepadTest"};
+    NSString *resource = nil;
+    if ([URL.scheme isEqualToString:@"tvbrowser"]) {
+        resource = pages[URL.host.lowercaseString ?: @""];
+    } else if (URL.isFileURL) {
+        NSString *name = URL.lastPathComponent.stringByDeletingPathExtension;
+        if ([pages.allValues containsObject:name]) {
+            resource = name;
+        }
+    }
+    return resource != nil ? [[NSBundle mainBundle] URLForResource:resource withExtension:@"html"] : nil;
+}
+
 @interface BrowserWebView ()
 
 @property (nullable, nonatomic, strong) id runtimeWebView;
@@ -533,8 +727,23 @@ static void BrowserInstallYouTubeCaptureUserScript(id configuration) {
     if (configuration != nil && [configuration respondsToSelector:allowsInlineMediaPlaybackSelector]) {
         ((void (*)(id, SEL, BOOL))objc_msgSend)(configuration, allowsInlineMediaPlaybackSelector, allowsInlineMediaPlayback);
     }
+    SEL mediaUserActionSelector = NSSelectorFromString(@"setMediaTypesRequiringUserActionForPlayback:");
+    if (configuration != nil && [configuration respondsToSelector:mediaUserActionSelector]) {
+        // The cursor clicks through synthetic DOM events, which never count as a user gesture.
+        ((void (*)(id, SEL, NSUInteger))objc_msgSend)(configuration, mediaUserActionSelector, 0);
+    }
     BrowserConfigurePrivateMediaPreferences(configuration);
     BrowserInstallYouTubeCaptureUserScript(configuration);
+
+    id userContentController = BrowserUserContentControllerForConfiguration(configuration);
+    BrowserAddUserScript(userContentController, BrowserPageAgentScript(), NO);
+    SEL addMessageHandlerSelector = NSSelectorFromString(@"addScriptMessageHandler:name:");
+    if ([userContentController respondsToSelector:addMessageHandlerSelector]) {
+        BrowserScriptMessageProxy *proxy = [BrowserScriptMessageProxy new];
+        proxy.target = self;
+        ((void (*)(id, SEL, id, id))objc_msgSend)(userContentController, addMessageHandlerSelector, proxy, kBrowserAgentMessageHandlerName);
+    }
+    BrowserInstallAdBlock(userContentController);
 
     id webViewObject = ((id (*)(id, SEL))objc_msgSend)((id)webViewClass, @selector(alloc));
     SEL initializer = NSSelectorFromString(@"initWithFrame:configuration:");
@@ -622,8 +831,23 @@ static void BrowserInstallYouTubeCaptureUserScript(id configuration) {
     return self.runtimeWebView != nil && [self.runtimeWebView respondsToSelector:selector] ? ((BOOL (*)(id, SEL))objc_msgSend)(self.runtimeWebView, selector) : NO;
 }
 
+/// Pages shipped inside the app are addressed as tvbrowser://<name> (see BrowserBuiltInPageURL).
+- (BOOL)loadBuiltInPageForRequest:(NSURLRequest *)request {
+    NSURL *fileURL = BrowserBuiltInPageURL(request.URL);
+    SEL selector = NSSelectorFromString(@"loadFileURL:allowingReadAccessToURL:");
+    if (fileURL == nil || ![self.runtimeWebView respondsToSelector:selector]) {
+        return NO;
+    }
+    self.lastRequest = [NSURLRequest requestWithURL:fileURL];
+    ((id (*)(id, SEL, id, id))objc_msgSend)(self.runtimeWebView, selector, fileURL, fileURL);
+    return YES;
+}
+
 - (void)loadRequest:(NSURLRequest *)request {
     if (request == nil || self.runtimeWebView == nil) {
+        return;
+    }
+    if ([self loadBuiltInPageForRequest:request]) {
         return;
     }
     self.lastRequest = request;
@@ -678,6 +902,46 @@ static void BrowserInstallYouTubeCaptureUserScript(id configuration) {
         return nil;
     }
     return BrowserStringFromJavaScriptResult(evaluationResult);
+}
+
+- (void)evaluateJavaScriptWithoutWaiting:(NSString *)script {
+    SEL selector = NSSelectorFromString(@"evaluateJavaScript:completionHandler:");
+    if (script.length == 0 || self.runtimeWebView == nil || ![self.runtimeWebView respondsToSelector:selector]) {
+        return;
+    }
+    ((void (*)(id, SEL, id, id))objc_msgSend)(self.runtimeWebView, selector, script, nil);
+}
+
+- (void)browser_handleAgentMessage:(id)message {
+    SEL bodySelector = NSSelectorFromString(@"body");
+    SEL frameInfoSelector = NSSelectorFromString(@"frameInfo");
+    SEL mainFrameSelector = NSSelectorFromString(@"isMainFrame");
+    if (![message respondsToSelector:bodySelector]) {
+        return;
+    }
+    if ([message respondsToSelector:frameInfoSelector]) {
+        id frameInfo = ((id (*)(id, SEL))objc_msgSend)(message, frameInfoSelector);
+        if ([frameInfo respondsToSelector:mainFrameSelector] && !((BOOL (*)(id, SEL))objc_msgSend)(frameInfo, mainFrameSelector)) {
+            return;
+        }
+    }
+    id body = ((id (*)(id, SEL))objc_msgSend)(message, bodySelector);
+    if (![body isKindOfClass:[NSDictionary class]]) {
+        return;
+    }
+    if ([self.delegate respondsToSelector:@selector(webView:didReceiveAgentMessage:)]) {
+        [self.delegate webView:self didReceiveAgentMessage:body];
+    }
+}
+
++ (BOOL)isAdBlockEnabled {
+    return ![[NSUserDefaults standardUserDefaults] boolForKey:BrowserAdBlockDisabledDefaultsKey];
+}
+
++ (void)setAdBlockEnabled:(BOOL)enabled {
+    [[NSUserDefaults standardUserDefaults] setBool:!enabled forKey:BrowserAdBlockDisabledDefaultsKey];
+    BrowserApplyAdBlockToAllControllers();
+    BrowserCompileAdBlockRulesIfNeeded();
 }
 
 - (void)pauseAllMediaPlayback {
