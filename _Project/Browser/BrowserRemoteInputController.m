@@ -267,8 +267,9 @@ static NSString *BrowserPressPhaseString(UIPressPhase phase) {
         __weak typeof(self) weakSelf = self;
         BrowserMenuPressShouldIntercept = ^BOOL {
             typeof(self) strongSelf = weakSelf;
-            return strongSelf != nil && !strongSelf.gameModeEnabled &&
-                [strongSelf.host browserRemoteInputControllerPresentedViewController] == nil;
+            // Also while a menu is presented. Leaving Menu to the system dismisses that menu and
+            // then treats the same press as leaving the app.
+            return strongSelf != nil && !strongSelf.gameModeEnabled;
         };
         BrowserMenuPressBegan = ^{
             [weakSelf noteCancelPressBegan];

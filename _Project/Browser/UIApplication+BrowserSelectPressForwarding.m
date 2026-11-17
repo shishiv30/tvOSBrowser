@@ -1,3 +1,4 @@
+#import "AppDelegate.h"
 #import <UIKit/UIKit.h>
 #import <QuartzCore/QuartzCore.h>
 #import <objc/message.h>
@@ -83,7 +84,7 @@ BOOL BrowserGameModeSwallowsRemotePresses = NO;
 // When the last Menu press of any phase went through the app, so a controller button read
 // directly can tell whether tvOS already delivered the matching press.
 CFTimeInterval BrowserLastMenuPressTimestamp = 0;
-// Menu on the browser itself (nothing presented) is taken away from the system here. Left to the
+// Menu is taken away from the system here, including while a menu is presented. Left to the
 // responder chain it can still end up as "leave the app" even though the browser handled it.
 BOOL (^BrowserMenuPressShouldIntercept)(void) = nil;
 void (^BrowserMenuPressPerform)(void) = nil;
@@ -94,18 +95,26 @@ static BOOL sBrowserMenuPressIntercepted = NO;
 // with no media. Take the press here, before that happens.
 void (^BrowserPlayPausePressPerform)(UIPressPhase phase) = nil;
 static BOOL sBrowserPlayPauseForMenu = NO;
+// A synthetic click runs inside sendEvent: and WebKit sends another non-press event
+// before that call returns. Forwarding it here nests sendEvent: and the app stops responding.
+static BOOL sBrowserSendEventEntered = NO;
 
 FOUNDATION_EXPORT void BrowserInputTraceMessage(NSString *message);
 
 static UIViewController *BrowserFindPresentedNativeVideoPlayerViewController(UIApplication *application, Class nativeVideoPlayerClass) {
-    for (UIWindow *window in application.windows) {
-        if (window.hidden || window.rootViewController == nil) {
+    for (UIScene *scene in application.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) {
             continue;
         }
+        for (UIWindow *window in ((UIWindowScene *)scene).windows) {
+            if (window.hidden || window.rootViewController == nil) {
+                continue;
+            }
 
-        UIViewController *match = BrowserFindViewControllerOfClass(window.rootViewController, nativeVideoPlayerClass);
-        if (match != nil) {
-            return match;
+            UIViewController *match = BrowserFindViewControllerOfClass(window.rootViewController, nativeVideoPlayerClass);
+            if (match != nil) {
+                return match;
+            }
         }
     }
     return nil;
@@ -131,6 +140,12 @@ static UIViewController *BrowserFindPresentedNativeVideoPlayerViewController(UIA
 }
 
 - (void)browser_sendEvent:(UIEvent *)event {
+    if (sBrowserSendEventEntered && event.type != UIEventTypePresses) {
+        return;
+    }
+    BOOL outermost = !sBrowserSendEventEntered;
+    sBrowserSendEventEntered = YES;
+    @try {
     Class nativeVideoPlayerClass = NSClassFromString(@"BrowserNativeVideoPlayerViewController");
     UIViewController *nativeVideoPlayerViewController = BrowserFindPresentedNativeVideoPlayerViewController(self, nativeVideoPlayerClass);
 
@@ -318,9 +333,7 @@ static UIViewController *BrowserFindPresentedNativeVideoPlayerViewController(UIA
     @try {
         [self browser_sendEvent:event];
     } @catch (NSException *exception) {
-        BrowserInputTraceMessage([NSString stringWithFormat:@"EXCEPTION while delivering press: %@ | %@", exception.reason,
-                                  [exception.callStackSymbols componentsJoinedByString:@" | "]]);
-        NSLog(@"[InputTrace][App] ignored press exception %@", exception.reason);
+        BrowserRecoverFromException(exception);
     }
 
     for (UIPress *press in presses) {
@@ -331,6 +344,11 @@ static UIViewController *BrowserFindPresentedNativeVideoPlayerViewController(UIA
                 [[NSNotificationCenter defaultCenter] postNotificationName:BrowserGlobalSelectPressEndedNotification object:nil];
             });
             break;
+        }
+    }
+    } @finally {
+        if (outermost) {
+            sBrowserSendEventEntered = NO;
         }
     }
 }

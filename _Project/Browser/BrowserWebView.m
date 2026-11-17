@@ -1209,6 +1209,11 @@ static NSURL *BrowserBuiltInPageURL(NSURL *URL) {
 - (void)webViewWebContentProcessDidTerminate:(id)webView {
     self.loading = NO;
     BrowserInputTraceMessage(@"web content process TERMINATED");
+    if (self.lastRequest != nil) {
+        [self loadRequest:self.lastRequest];
+    } else {
+        [self reload];
+    }
 }
 
 - (NSURLRequest *)requestFromNavigationAction:(id)navigationAction {

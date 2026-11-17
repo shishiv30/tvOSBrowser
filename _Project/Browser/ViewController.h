@@ -18,5 +18,6 @@
 @property (nonatomic, retain) IBOutlet UIView *browserContainerView;
 
 - (BOOL)browserFullscreenVideoActive;
+- (void)reloadAfterException;
 
 @end

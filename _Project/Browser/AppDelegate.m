@@ -9,12 +9,45 @@
 #import "AppDelegate.h"
 #import "BrowserPreferencesStore.h"
 #import "BrowserWebView.h"
+#import "ViewController.h"
 
 @interface AppDelegate ()
-
+- (BOOL)reloadFrontPageAfterException;
 @end
 
+static NSTimeInterval sBrowserLastRecoveryTime = 0;
+
+static void BrowserUncaughtExceptionHandler(NSException *exception) {
+    NSLog(@"[Browser] uncaught %@: %@\n%@", exception.name, exception.reason, exception.callStackSymbols);
+    exit(EXIT_SUCCESS);
+}
+
+void BrowserRecoverFromException(NSException *exception) {
+    NSLog(@"[Browser] caught %@: %@\n%@", exception.name, exception.reason, exception.callStackSymbols);
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if ((now - sBrowserLastRecoveryTime) < 2.0) {
+        NSLog(@"[Browser] exception repeated, leaving the app");
+        exit(EXIT_SUCCESS);
+    }
+    sBrowserLastRecoveryTime = now;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        AppDelegate *delegate = (AppDelegate *)UIApplication.sharedApplication.delegate;
+        if (![delegate isKindOfClass:[AppDelegate class]] || ![delegate reloadFrontPageAfterException]) {
+            exit(EXIT_SUCCESS);
+        }
+    });
+}
+
 @implementation AppDelegate
+
+- (BOOL)reloadFrontPageAfterException {
+    ViewController *controller = (ViewController *)self.window.rootViewController;
+    if (![controller isKindOfClass:[ViewController class]]) {
+        return NO;
+    }
+    [controller reloadAfterException];
+    return YES;
+}
 
 - (void)restoreCookiesFromDefaults {
     NSData *cookieData = [[NSUserDefaults standardUserDefaults] objectForKey:@"ApplicationCookie"];
@@ -37,7 +70,7 @@
 
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions {
-	// Override point for customization after application launch.
+    NSSetUncaughtExceptionHandler(&BrowserUncaughtExceptionHandler);
     if ([[NSUserDefaults standardUserDefaults] boolForKey:@"MobileMode"]) {
         [[NSUserDefaults standardUserDefaults] setObject:BrowserPreferencesStore.mobileUserAgent forKey:@"UserAgent"];
         [[NSUserDefaults standardUserDefaults] setBool:YES forKey:@"MobileMode"];
@@ -65,7 +98,9 @@
     NSArray<NSArray<NSString *> *> *defaultFavorites = @[
         @[@"https://www.kubb.tv", @"kubb"],
         @[@"https://www.suno.com", @"suno"],
-        @[@"https://www.magewords.com", @"magewords"],
+        @[@"https://magewords.com", @"magewords"],
+        @[@"https://www.rednote.com", @"rednote"],
+        @[@"https://www.tiktok.com", @"tiktok"],
         @[@"tvbrowser://gamepad-test", @"Gamepad Test"],
     ];
     NSMutableArray *existingFavorites = [[[NSUserDefaults standardUserDefaults] arrayForKey:@"FAVORITES"] mutableCopy];
@@ -74,7 +109,7 @@
     }
 
     // Former defaults: dropped from an existing install so the replacement does not sit next to them.
-    NSSet<NSString *> *retiredDefaultHosts = [NSSet setWithObjects:@"iyf.tv", @"douyin.com", @"rednote.com", @"bilibili.com", @"youtube.com", @"youtu.be", nil];
+    NSSet<NSString *> *retiredDefaultHosts = [NSSet setWithObjects:@"iyf.tv", @"douyin.com", @"bilibili.com", @"youtube.com", @"youtu.be", nil];
 
     NSMutableArray *favorites = [NSMutableArray array];
     NSMutableSet<NSString *> *defaultHosts = [NSMutableSet set];
@@ -88,7 +123,7 @@
         for (NSArray *existingEntry in existingFavorites) {
             NSString *existingURL = existingEntry.count > 0 ? existingEntry[0] : @"";
             if ([[self favoriteHostForURLString:existingURL] isEqualToString:host]) {
-                savedEntry = @[existingURL.length > 0 ? existingURL : entry[0], entry[1]];
+                savedEntry = entry;
                 break;
             }
         }

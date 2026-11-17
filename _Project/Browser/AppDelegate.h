@@ -12,6 +12,8 @@
 
 @property (strong, nonatomic) UIWindow *window;
 
+/// Caught NSException. Reloads the front page, or leaves the app if that just failed.
+void BrowserRecoverFromException(NSException *exception);
 
 @end
 

@@ -180,6 +180,17 @@ static UIColor *kTextColor(void) {
     [self.tabCoordinator loadHomePage];
 }
 
+- (void)reloadAfterException {
+    if (self.presentedViewController != nil) {
+        [self dismissViewControllerAnimated:NO completion:nil];
+    }
+    if (self.webview != nil) {
+        [self.webview reload];
+        return;
+    }
+    [self loadHomePage];
+}
+
 - (void)showAdvancedMenu {
     [self deactivateTopBarFocusMode];
     [self.menuCoordinator showAdvancedMenu];
