@@ -11,6 +11,7 @@ The remote and gamepads share the same logical keys. The gamepad D-pad, A, B and
 | Logical key | Remote | Gamepad |
 | --- | --- | --- |
 | Direction (move pointer) | Arrow keys / touch surface | D-pad, left stick; hold a trigger (LT / RT) to speed up |
+| History back / forward | Quick Menu | L1 / L / LB goes back, R1 / R / RB goes forward |
 | Scroll page | Quickly press Up / Down twice | Right stick, or quickly press D-pad Up / Down twice |
 | Confirm | Select | A |
 | Cancel | Menu | B (**+** is also the system Menu) |
@@ -26,9 +27,13 @@ The remote and gamepads share the same logical keys. The gamepad D-pad, A, B and
 
 | State | Direction | Confirm | Cancel | Menu |
 | --- | --- | --- | --- | --- |
-| Browsing a page | Move pointer; pushing into a screen edge scrolls the page | Click; clicking a video plays it fullscreen | Go back; asks whether to quit when there is no history | Open Quick Menu |
+| Browsing a page | Move pointer; pushing into a screen edge scrolls the page | Click (never starts fullscreen) | Go back; asks whether to quit when there is no history | Open Quick Menu |
 | Video fullscreen | Left / right seeks back / forward 10 seconds; hold to keep seeking | Pause / play | Exit fullscreen; the video keeps playing in the page | Open Quick Menu |
 | Quick Menu | Select | Run | Close menu | Close menu |
+
+On a gamepad the left face button (Switch Y, PS5 square, Xbox X) plays the video under the pointer full screen (`gamepadFullscreenButtonDidChange:`); the Play/Pause press tvOS derives from it is ignored for 0.4 seconds.
+
+Play/Pause opens the Quick Menu the moment it goes down (`playPauseHoldFired` in `BrowserRemoteInputController.m` marks that the release must be ignored). Waiting for the release missed presses whose release was never delivered.
 
 Confirm now takes effect on press. It used to wait 0.3 seconds to detect a double click; that wait has been removed, and the Play/Pause double-press gesture has been removed too. The Advanced Menu is now reached from **More Options** in the Quick Menu.
 
@@ -100,12 +105,16 @@ Video URLs are no longer handed to AVPlayer. On sites such as Bilibili, YouTube 
 - Injection and message bridge: the "Page agent, script bridge and ad blocking" section of `BrowserWebView.m`
 - Native state: the "Page video full screen" section of `ViewController.m`; the top bar and pointer are hidden while `pageVideoActive` is true
 
-Order of checks on a click (`activate`):
+A click (`activate`) only clicks; it never starts fullscreen, and nothing goes fullscreen on its own. Guessing from a click whether the user meant "play this fullscreen" misfired on inputs and links, differently on every site.
 
-1. Link, button or input under the pointer: treated as a normal click.
-2. The pointer is inside a video's bounds and the topmost element belongs to the same player (overlay and control layers count too): go fullscreen and play.
-3. A cross-origin iframe is under the pointer: forward the click to the script inside the iframe, which repeats steps 1 and 2.
-4. Anything else: click as usual and then observe for 6 seconds; if a video starts playing at the click position, or a large unmuted video starts playing, go fullscreen automatically. If the click opened a new page, the new page is observed for 8 seconds after it finishes loading.
+Fullscreen is an explicit command, the first Quick Menu item, **Full Screen Video** (`fullscreenAt`). Target order:
+
+1. An iframe is under the pointer: only that frame is asked.
+2. A video whose box contains the pointer (a playing one first, then the largest).
+3. The main video of the document (playing, unmuted, largest).
+4. No video in the document: every iframe is asked, and the first one that has a video wins.
+
+If nothing is found a toast says so.
 
 While fullscreen, a time progress hint is shown at the bottom for 3 seconds after any action, and stays visible while paused.
 
@@ -115,7 +124,7 @@ Besides setting the video to `position: fixed`, the stretch also sets `overflow`
 
 ## Quick Menu
 
-Opened with the Menu key; closed with Cancel or by pressing Menu again. Contents: Back, Forward, Enter Address, Refresh, Hide Top Bar, Ad Block toggle, Game Mode (only when a gamepad is connected), More Options (Advanced Menu), Bookmarks. The "video fullscreen" entry was removed: clicking a video goes fullscreen and Cancel exits, so no menu entry is needed.
+Opened with the Menu key; closed with Cancel or by pressing Menu again. Contents: Full Screen Video (Exit Full Screen Video while one is fullscreen), Back, Forward, Enter Address, Refresh, Hide Top Bar, Ad Block toggle, Game Mode (only when a gamepad is connected), More Options (Advanced Menu), Bookmarks.
 
 The system also sends Play/Pause to the page as a media key, which paused the video when the menu opened. The page script does two things: it replaces the page's `mediaSession` play/pause handlers with no-ops, and it undoes any pause/play that appears within 1 second before or after the Menu press and was not initiated by us (`guard`).
 
@@ -146,9 +155,8 @@ This is not a complete filter list; pre-roll ads served from a video site's own 
 
 Tested on Bilibili (desktop site) in the tvOS 27.2 simulator (Apple TV 4K, 1080p):
 
-- Click a video card on the home page → the video page opens in the current tab → fullscreen starts automatically once playback begins, the picture filling 1920×1080.
+- Click a video card on the home page → the video page opens in the current tab and plays inline; Quick Menu → Full Screen Video fills 1920×1080. (Not re-tested after fullscreen became a menu command.)
 - Cancel exits fullscreen, the page layout is restored, and the video keeps playing.
-- Clicking the player directly in the page → fullscreen immediately.
 - The page script's `page` / `scrollBy` can scroll the page.
 
 The web-page side of Game Mode was tested with simulated gamepad state (calling `__tvb.pad` directly): hardwaretester.com/gamepad recognizes the Pro Controller and DualSense, and buttons, analog trigger values, stick axes and the touchpad button are all shown correctly; it is recognized the same way inside a cross-origin iframe; after turning Game Mode off the page receives the disconnect event. The built-in test page opens normally; 5 simulated taps where "press and release arrive in the same frame" were all read by the page (all recovered by the latch), and the three counters agree.

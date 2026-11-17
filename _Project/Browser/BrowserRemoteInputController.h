@@ -31,7 +31,11 @@ NS_ASSUME_NONNULL_BEGIN
 /// Runs a script that hands the controller state to the page (see `__tvb.pad` in BrowserPageAgent.js).
 - (void)browserRemoteInputControllerEvaluateGamepadScript:(NSString *)script;
 - (void)browserRemoteInputControllerHandleMenuPress;
+- (void)browserRemoteInputControllerGoBack;
+- (void)browserRemoteInputControllerGoForward;
 - (void)browserRemoteInputControllerHandlePlayPausePress;
+/// Plays the video under the pointer (else the page's main video) full screen.
+- (void)browserRemoteInputControllerEnterPageVideo;
 - (NSString *)browserRemoteInputControllerHoverStateAtCursorPoint:(CGPoint)point;
 - (void)browserRemoteInputControllerSetWebInteractionEnabled:(BOOL)enabled;
 - (void)browserRemoteInputControllerPersistSession;
@@ -41,6 +45,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)browserRemoteInputControllerDeleteBackward;
 
 @end
+
+/// Appends one line to the input trace log (Library/Caches/input-trace.log).
+FOUNDATION_EXPORT void BrowserInputTraceMessage(NSString *message);
 
 @interface BrowserRemoteInputController : NSObject
 

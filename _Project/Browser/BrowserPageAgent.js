@@ -10,8 +10,6 @@
         element: null,
         kind: '',
         saved: [],
-        watchUntil: 0,
-        watchPoint: null,
         selfUntil: 0,
         guardUntil: 0
     };
@@ -121,28 +119,14 @@
         return null;
     }
 
-    // The video counts as "under the cursor" when the hit element is the video,
-    // or an overlay that belongs to the same player box.
-    function belongsToPlayer(hit, video) {
-        if (!hit || hit === video) { return true; }
-        var videoArea = area(video.getBoundingClientRect());
-        for (var node = hit, i = 0; node && i < 10; node = parentOf(node), i++) {
-            var holdsVideo = false;
-            try { holdsVideo = node.contains(video) || (node.shadowRoot && node.shadowRoot.contains(video)); } catch (error) {}
-            if (holdsVideo) {
-                return area(node.getBoundingClientRect()) <= videoArea * 2.2;
-            }
-        }
-        return false;
-    }
-
-    function videoAtPoint(x, y, hit) {
+    // The video whose box holds the point, whatever is drawn on top of it.
+    function videoContaining(x, y) {
         var best = null;
         var bestScore = -1;
         collect('video').forEach(function (video) {
             if (!usable(video) || !hasSource(video)) { return; }
             var rect = video.getBoundingClientRect();
-            if (!contains(rect, x, y) || !belongsToPlayer(hit, video)) { return; }
+            if (!contains(rect, x, y)) { return; }
             var score = area(rect) + (isPlaying(video) ? 1e9 : 0);
             if (score > bestScore) { bestScore = score; best = video; }
         });
@@ -231,7 +215,6 @@
         T.element = element;
         T.kind = kind;
         T.saved = [];
-        T.watchUntil = 0;
         missingTicks = 0;
         applyProps(element, elementProps(), true);
         for (var node = parentOf(element), i = 0; node && i < 60; node = parentOf(node), i++) {
@@ -264,7 +247,6 @@
         T.active = false;
         T.element = null;
         T.kind = '';
-        T.watchUntil = 0;
         hideHud();
         if (kind === 'frame' && element) {
             try { post(element.contentWindow, { type: 'exit' }); } catch (error) {}
@@ -370,7 +352,7 @@
         hud = null;
     }
 
-    // ---- click / activate / watch -----------------------------------------
+    // ---- click / activate / full screen command ---------------------------
 
     function click(x, y) {
         var target = deepElementFromPoint(x, y);
@@ -407,47 +389,7 @@
         }
     }
 
-    function qualifies(video) {
-        if (!usable(video) || !hasSource(video)) { return false; }
-        var rect = video.getBoundingClientRect();
-        if (T.watchPoint && contains(rect, T.watchPoint.x, T.watchPoint.y)) { return true; }
-        return !video.muted && rect.width >= 300 && area(rect) >= window.innerWidth * window.innerHeight * 0.12;
-    }
-
-    function scanWatch() {
-        if (T.active || now() > T.watchUntil) { return false; }
-        var best = null;
-        var bestArea = 0;
-        collect('video').forEach(function (video) {
-            if (!isPlaying(video) || !qualifies(video)) { return; }
-            var size = area(video.getBoundingClientRect());
-            if (size > bestArea) { bestArea = size; best = video; }
-        });
-        if (best) { enter(best, 'video'); return true; }
-        return false;
-    }
-
-    var watchTimer = 0;
-
-    function arm(x, y, duration, cascade) {
-        if (T.active) { return; }
-        T.watchPoint = (x >= 0 && y >= 0) ? { x: x, y: y } : null;
-        T.watchUntil = now() + duration;
-        clearInterval(watchTimer);
-        watchTimer = setInterval(function () {
-            if (T.active || now() > T.watchUntil || scanWatch()) {
-                clearInterval(watchTimer);
-                watchTimer = 0;
-            }
-        }, 300);
-        if (cascade) {
-            collect('iframe').forEach(function (frame) {
-                try { post(frame.contentWindow, { type: 'arm', duration: duration }); } catch (error) {}
-            });
-        }
-        scanWatch();
-    }
-
+    // A click only clicks. It never starts full screen: that is fullscreenAt(), an explicit command.
     function activate(x, y, clickLocally) {
         if (T.active) { return 'video'; }
         var hit = deepElementFromPoint(x, y);
@@ -455,24 +397,49 @@
         if (hit.tagName === 'IFRAME' || hit.tagName === 'FRAME') {
             var point = frameOffset(hit, x, y);
             var agent = sameOriginAgent(hit);
-            if (agent) {
-                var result = agent.activate(point.x, point.y, clickLocally);
-                if (result === 'video') { enter(hit, 'frame'); }
-                return result;
-            }
+            if (agent) { return agent.activate(point.x, point.y, clickLocally); }
             post(hit.contentWindow, { type: 'activate', x: point.x, y: point.y });
             return 'frame';
         }
-        if (!interactiveAncestor(hit)) {
-            var video = videoAtPoint(x, y, hit);
-            if (video) {
-                enter(video, 'video');
-                return 'video';
-            }
-        }
-        arm(x, y, 6000, true);
         if (clickLocally) { click(x, y); }
         return 'none';
+    }
+
+    // The user asked for full screen. Picks the video at the point, else the main video of this
+    // document, else lets the frames answer (the first one that has a video wins).
+    function fullscreenAt(x, y) {
+        if (T.active) { return 'video'; }
+        var hit = (x >= 0 && y >= 0) ? deepElementFromPoint(x, y) : null;
+        if (hit && (hit.tagName === 'IFRAME' || hit.tagName === 'FRAME')) {
+            var point = frameOffset(hit, x, y);
+            var agent = sameOriginAgent(hit);
+            if (agent) {
+                var result = agent.fullscreenAt(point.x, point.y);
+                if (result === 'video') { enter(hit, 'frame'); }
+                if (result !== 'none') { return result; }
+            } else {
+                post(hit.contentWindow, { type: 'fullscreen', x: point.x, y: point.y });
+                return 'frame';
+            }
+        }
+        var video = (hit ? videoContaining(x, y) : null) || bestVideo(false);
+        if (video) {
+            enter(video, 'video');
+            return 'video';
+        }
+        var frames = collect('iframe');
+        for (var i = 0; i < frames.length; i++) {
+            var inner = sameOriginAgent(frames[i]);
+            if (inner) {
+                if (inner.fullscreenAt(-1, -1) === 'video') {
+                    enter(frames[i], 'frame');
+                    return 'video';
+                }
+            } else {
+                try { post(frames[i].contentWindow, { type: 'fullscreen', x: -1, y: -1 }); } catch (error) {}
+            }
+        }
+        return frames.length ? 'frame' : 'none';
     }
 
     function scrollableAt(x, y, dx, dy) {
@@ -497,6 +464,16 @@
             post(hit.contentWindow, { type: 'scroll', x: point.x, y: point.y, dx: dx, dy: dy, smooth: !!smooth });
             return 'frame';
         }
+        // Each axis goes to its own container: the nearest one around the pointer that scrolls that
+        // way. A horizontal list inside a vertical page therefore moves sideways on left/right while
+        // up/down still moves the page.
+        var result = 'window';
+        if (dx !== 0 && scrollAxis(x, y, dx, 0, smooth) === 'element') { result = 'element'; }
+        if (dy !== 0 && scrollAxis(x, y, 0, dy, smooth) === 'element') { result = 'element'; }
+        return result;
+    }
+
+    function scrollAxis(x, y, dx, dy, smooth) {
         var target = scrollableAt(x, y, dx, dy);
         var options = { left: dx, top: dy, behavior: smooth ? 'smooth' : 'auto' };
         if (target) {
@@ -518,7 +495,6 @@
         if (!video || video.tagName !== 'VIDEO' && video.tagName !== 'AUDIO') { return; }
         var time = now();
         if (event.type === 'playing' || event.type === 'timeupdate') {
-            if (!T.active && time <= T.watchUntil && video.tagName === 'VIDEO') { scanWatch(); }
             if (T.active && T.element === video && event.type === 'timeupdate' && hud && hud.style.opacity === '1') { refreshHud(); }
             return;
         }
@@ -562,7 +538,11 @@
             var originalSetActionHandler = session.setActionHandler.bind(session);
             var blocked = { play: 1, pause: 1, stop: 1 };
             Object.keys(blocked).forEach(function (action) {
-                try { originalSetActionHandler(action, function () {}); } catch (error) {}
+                try {
+                    originalSetActionHandler(action, function () {
+                        postNative({ type: 'media-key', action: action });
+                    });
+                } catch (error) {}
             });
             session.setActionHandler = function (action, handler) {
                 if (blocked[action]) { return; }
@@ -588,7 +568,7 @@
         if (data.type === 'fs-enter' || data.type === 'fs-exit') {
             var frame = frameForWindow(event.source);
             if (!frame) { return; }
-            if (data.type === 'fs-enter') { enter(frame, 'frame'); }
+            if (data.type === 'fs-enter') { if (!T.active) { enter(frame, 'frame'); } }
             else if (T.active && T.element === frame) { exitLocal(false); }
             return;
         }
@@ -597,22 +577,12 @@
             case 'exit': exitLocal(true); break;
             case 'cmd': runCommand(data.name, data.value); break;
             case 'activate': activate(Number(data.x), Number(data.y), true); break;
-            case 'arm': arm(-1, -1, Number(data.duration) || 6000, true); break;
-            case 'best': enterBest(); break;
+            case 'fullscreen': fullscreenAt(Number(data.x), Number(data.y)); break;
             case 'scroll': scrollBy(Number(data.x), Number(data.y), Number(data.dx), Number(data.dy), !!data.smooth); break;
             case 'guard': guard(true); break;
             case 'pad': setPad(data.state, true); break;
         }
     }, false);
-
-    function enterBest() {
-        var video = bestVideo(false);
-        if (video) { enter(video, 'video'); return 'video'; }
-        collect('iframe').forEach(function (frame) {
-            try { post(frame.contentWindow, { type: 'best' }); } catch (error) {}
-        });
-        return 'frame';
-    }
 
     // ---- ad skipping ------------------------------------------------------
 
@@ -755,10 +725,9 @@
     // ---- native API (top frame) -------------------------------------------
 
     T.activate = function (x, y, clickLocally) { return activate(Number(x), Number(y), !!clickLocally); };
-    T.arm = function (x, y, duration) { arm(Number(x), Number(y), Number(duration) || 6000, true); return 'ok'; };
     T.exit = function () { exitLocal(false); return 'ok'; };
     T.command = function (name, value) { return runCommand(name, value); };
-    T.enterBest = function () { return enterBest(); };
+    T.fullscreenAt = function (x, y) { return fullscreenAt(Number(x), Number(y)); };
     T.scrollBy = function (x, y, dx, dy, smooth) { return scrollBy(Number(x), Number(y), Number(dx), Number(dy), !!smooth); };
     // One "page" step (a fraction of the viewport height), animated.
     T.page = function (x, y, fraction) { return scrollBy(Number(x), Number(y), 0, Math.round(window.innerHeight * Number(fraction)), true); };

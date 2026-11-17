@@ -6,6 +6,8 @@
 //  Improved by Jip van Akker on 14/10/2015 through 10/01/2019
 //
 
+#import <QuartzCore/QuartzCore.h>
+
 #import "BrowserMenuCoordinator.h"
 #import "BrowserDOMInteractionService.h"
 #import "BrowserNavigationService.h"
@@ -48,7 +50,6 @@ static UIColor *kTextColor(void) {
 @property (nonatomic, getter=isTopBarFocusActive) BOOL topBarFocusActive;
 /// A page video currently fills the screen (driven by BrowserPageAgent.js).
 @property (nonatomic) BOOL pageVideoActive;
-@property (nonatomic) CFTimeInterval lastPageClickTimestamp;
 @property (nonatomic, weak) UILabel *toastLabel;
 
 @end
@@ -363,6 +364,19 @@ static UIColor *kTextColor(void) {
                                                                              message:@""
                                                                       preferredStyle:UIAlertControllerStyleAlert];
 
+    if (self.webview.request != nil && self.webview.request.URL.absoluteString.length > 0) {
+        BOOL videoActive = self.pageVideoActive;
+        [alertController addAction:[UIAlertAction actionWithTitle:videoActive ? @"Exit Full Screen Video" : @"Full Screen Video"
+                                                            style:UIAlertActionStyleDefault
+                                                          handler:^(__unused UIAlertAction *action) {
+            if (videoActive) {
+                [self exitPageVideo];
+            } else {
+                [self enterPageVideoFromMenu];
+            }
+        }]];
+    }
+
     if (self.webview.canGoBack) {
         [alertController addAction:[UIAlertAction actionWithTitle:@"Go Back"
                                                             style:UIAlertActionStyleDefault
@@ -394,7 +408,7 @@ static UIColor *kTextColor(void) {
         }]];
     }
 
-    NSString *fullScreenTitle = self.viewModel.topNavigationBarVisible ? @"Full Screen" : @"Exit Full Screen";
+    NSString *fullScreenTitle = self.viewModel.topNavigationBarVisible ? @"Hide Top Bar" : @"Show Top Bar";
     [alertController addAction:[UIAlertAction actionWithTitle:fullScreenTitle
                                                         style:UIAlertActionStyleDefault
                                                       handler:^(__unused UIAlertAction *action) {
@@ -500,7 +514,7 @@ static UIColor *kTextColor(void) {
 
 - (void)showHintsAlert {
     UIAlertController *alertController = [UIAlertController alertControllerWithTitle:@"Usage Guide"
-                                                                             message:@"Arrows / D-pad move the cursor; push against a screen edge to scroll.\nSelect / A clicks. Clicking a video plays it full screen.\nMenu / B goes back, and leaves full screen video.\nPlay/Pause / X opens the Quick Menu.\nIn full screen: Select pauses, Left/Right skip 10 seconds."
+                                                                             message:@"Arrows / D-pad move the cursor; push against a screen edge to scroll.\nSelect / A clicks. Quick Menu > Full Screen Video plays the video full screen.\nMenu / B goes back, and leaves full screen video.\nPlay/Pause / X opens the Quick Menu.\nIn full screen: Select pauses, Left/Right skip 10 seconds.\nGamepad: Switch Y / PS square / Xbox X plays the video full screen, L1 back, R1 forward, hold L2 / R2 to move faster."
                                                                       preferredStyle:UIAlertControllerStyleAlert];
 
     __weak typeof(self) weakSelf = self;
@@ -622,7 +636,28 @@ static UIColor *kTextColor(void) {
 }
 
 - (void)webView:(id)webView didReceiveAgentMessage:(NSDictionary *)message {
-    if (webView != self.webview || ![message[@"type"] isEqual:@"fs"]) {
+    if (webView != self.webview) {
+        return;
+    }
+    // A playing video takes the remote's Play/Pause as a media-session action, so it never
+    // arrives as a UIPress. That action is the Quick Menu request on those pages.
+    if ([message[@"type"] isEqual:@"media-key"]) {
+        NSString *action = [message[@"action"] isKindOfClass:[NSString class]] ? message[@"action"] : @"";
+        if (![action isEqualToString:@"play"] && ![action isEqualToString:@"pause"] && ![action isEqualToString:@"stop"]) {
+            return;
+        }
+        static CFTimeInterval lastMediaKey = 0;
+        CFTimeInterval now = CACurrentMediaTime();
+        BOOL menuVisible = [self.presentedViewController isKindOfClass:[UIAlertController class]];
+        if (menuVisible || (now - lastMediaKey) < 0.8) {
+            return;
+        }
+        lastMediaKey = now;
+        [self browserRemoteInputControllerFunctionKeyDown];
+        [self browserRemoteInputControllerHandlePlayPausePress];
+        return;
+    }
+    if (![message[@"type"] isEqual:@"fs"]) {
         return;
     }
     self.pageVideoActive = [message[@"active"] respondsToSelector:@selector(boolValue)] && [message[@"active"] boolValue];
@@ -630,34 +665,58 @@ static UIColor *kTextColor(void) {
 
 - (void)browserHandlePrimaryAction {
     if (self.webview == nil) {
+        BrowserInputTraceMessage(@"click: no web view");
         return;
     }
     if (!self.remoteInputController.cursorModeEnabled) {
+        BrowserInputTraceMessage(@"click: cursor mode off, activating focused element");
         [self activateFocusedPageElement];
         return;
     }
 
     CGPoint point = [self.view convertPoint:self.remoteInputController.cursorView.frame.origin toView:self.webview];
     if (point.y < 0) {
+        BrowserInputTraceMessage(@"click: cursor above page, opening top bar");
         [self activateTopBarFocusMode];
         return;
     }
 
     CGPoint domPoint = [self browserDOMPointForCursor];
-    self.lastPageClickTimestamp = CACurrentMediaTime();
+    // A click only clicks. Full screen video is its own command (Quick Menu > Full Screen Video).
     NSString *call = [NSString stringWithFormat:@"activate(%0.2f,%0.2f,false)", domPoint.x, domPoint.y];
     NSString *result = [self evaluatePageAgentCall:call fallback:@"none"];
-    if ([result isEqualToString:@"video"]) {
-        // A video is under the cursor: it is now full screen and playing.
-        self.pageVideoActive = YES;
-        return;
-    }
+    BrowserInputTraceMessage([NSString stringWithFormat:@"click: %@ -> %@ url=%@", call, result, self.webview.request.URL.host ?: @"?"]);
     if (![result isEqualToString:@"frame"]) {
         // "frame" means a cross-origin iframe took the click itself; everything else is a normal click.
         [self.pageActionCoordinator handlePageSelectionAtDOMPoint:domPoint webView:self.webview];
     }
-    // The click may start a player a moment later; the page script then goes full screen on its own.
+}
+
+/// Quick Menu command: the video under the cursor, else the page's main video, fills the screen.
+- (void)enterPageVideoFromMenu {
+    if (self.webview == nil) {
+        return;
+    }
+    CGPoint domPoint = self.remoteInputController.cursorModeEnabled ? [self browserDOMPointForCursor] : CGPointMake(-1.0, -1.0);
+    NSString *call = [NSString stringWithFormat:@"fullscreenAt(%0.2f,%0.2f)", domPoint.x, domPoint.y];
+    NSString *result = [self evaluatePageAgentCall:call fallback:@"none"];
+    BrowserInputTraceMessage([NSString stringWithFormat:@"full screen video: %@ -> %@", call, result]);
+    if ([result isEqualToString:@"video"]) {
+        self.pageVideoActive = YES;
+        return;
+    }
+    if ([result isEqualToString:@"none"]) {
+        [self showToastWithMessage:@"No video found on this page"];
+        return;
+    }
+    // A cross-origin frame was asked; it reports back on its own if it has a video.
     [self schedulePageVideoStateChecks];
+    __weak typeof(self) weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        if (weakSelf.presentedViewController == nil && ![weakSelf syncPageVideoState]) {
+            [weakSelf showToastWithMessage:@"No video found on this page"];
+        }
+    });
 }
 
 - (NSArray<id<UIFocusEnvironment>> *)preferredFocusEnvironments {
@@ -931,6 +990,18 @@ static UIColor *kTextColor(void) {
     [self.webview evaluateJavaScriptWithoutWaiting:@"window.__tvb&&window.__tvb.guard();"];
 }
 
+- (void)browserRemoteInputControllerGoBack {
+    if (self.webview.canGoBack) {
+        [self.webview goBack];
+    }
+}
+
+- (void)browserRemoteInputControllerGoForward {
+    if (self.webview.canGoForward) {
+        [self.webview goForward];
+    }
+}
+
 - (void)browserRemoteInputControllerHandleMenuPress {
     UIAlertController *alertController = (UIAlertController *)self.presentedViewController;
     if (alertController != nil) {
@@ -953,7 +1024,12 @@ static UIColor *kTextColor(void) {
     }
 }
 
+- (void)browserRemoteInputControllerEnterPageVideo {
+    [self enterPageVideoFromMenu];
+}
+
 - (void)browserRemoteInputControllerHandlePlayPausePress {
+    BrowserInputTraceMessage([NSString stringWithFormat:@"quick menu toggle: presented=%@ window=%d", NSStringFromClass([self.presentedViewController class]) ?: @"-", self.view.window != nil]);
     UIAlertController *alertController = (UIAlertController *)self.presentedViewController;
     if (alertController != nil) {
         [self.presentedViewController dismissViewControllerAnimated:YES completion:nil];
@@ -1154,11 +1230,6 @@ static UIColor *kTextColor(void) {
     [self.tabCoordinator webViewDidFinishLoad:webView];
     if (webView == self.webview) {
         [self syncPageVideoState];
-        if ((CACurrentMediaTime() - self.lastPageClickTimestamp) < 20.0) {
-            // The click opened this page: if its main video starts playing, take it full screen.
-            [self.webview evaluateJavaScriptWithoutWaiting:@"window.__tvb&&window.__tvb.arm(-1,-1,8000);"];
-            [self schedulePageVideoStateChecks];
-        }
     }
     if (self.tabOverviewController.visible) {
         BrowserTabViewModel *tab = [self.tabCoordinator tabForWebView:webView];

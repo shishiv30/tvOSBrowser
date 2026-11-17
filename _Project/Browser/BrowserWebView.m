@@ -1,6 +1,9 @@
 #import "BrowserWebView.h"
 
 #import <dlfcn.h>
+
+FOUNDATION_EXPORT void BrowserInputTraceMessage(NSString *message);
+
 #import <objc/message.h>
 #import <objc/runtime.h>
 
@@ -851,6 +854,21 @@ static NSURL *BrowserBuiltInPageURL(NSURL *URL) {
         return;
     }
     self.lastRequest = request;
+    BrowserInputTraceMessage([NSString stringWithFormat:@"page load request %@", request.URL.absoluteString]);
+    // Diagnostic: the same URL and a reference URL fetched natively, to tell a network problem
+    // from a web engine problem when a page never finishes loading.
+    for (NSURL *probeURL in @[request.URL ?: [NSURL URLWithString:@"about:blank"], [NSURL URLWithString:@"https://www.apple.com/library/test/success.html"]]) {
+        if (![probeURL.scheme hasPrefix:@"http"]) {
+            continue;
+        }
+        CFTimeInterval started = CACurrentMediaTime();
+        NSMutableURLRequest *probe = [NSMutableURLRequest requestWithURL:probeURL cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:15.0];
+        [[[NSURLSession sharedSession] dataTaskWithRequest:probe completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+            NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ? ((NSHTTPURLResponse *)response).statusCode : 0;
+            BrowserInputTraceMessage([NSString stringWithFormat:@"native probe %@ -> status=%ld bytes=%lu %.2fs error=%@", probeURL.host,
+                                      (long)status, (unsigned long)data.length, CACurrentMediaTime() - started, error.localizedDescription ?: @"-"]);
+        }] resume];
+    }
     SEL selector = NSSelectorFromString(@"loadRequest:");
     if ([self.runtimeWebView respondsToSelector:selector]) {
         ((id (*)(id, SEL, id))objc_msgSend)(self.runtimeWebView, selector, request);
@@ -1154,6 +1172,7 @@ static NSURL *BrowserBuiltInPageURL(NSURL *URL) {
 
 - (void)webView:(id)webView didStartProvisionalNavigation:(id)navigation {
     self.loading = YES;
+    BrowserInputTraceMessage(@"page load started");
     if ([self.delegate respondsToSelector:@selector(webViewDidStartLoad:)]) {
         [self.delegate webViewDidStartLoad:self];
     }
@@ -1163,6 +1182,7 @@ static NSURL *BrowserBuiltInPageURL(NSURL *URL) {
     self.loading = NO;
     self.lastTitle = [self title];
     self.lastRequest = [self request];
+    BrowserInputTraceMessage([NSString stringWithFormat:@"page load finished %@", self.lastRequest.URL.absoluteString]);
     [self installYouTubeRequestCaptureHook];
     [self applyPageScalingIfNeeded];
     if ([self.delegate respondsToSelector:@selector(webViewDidFinishLoad:)]) {
@@ -1172,6 +1192,7 @@ static NSURL *BrowserBuiltInPageURL(NSURL *URL) {
 
 - (void)webView:(id)webView didFailNavigation:(id)navigation withError:(NSError *)error {
     self.loading = NO;
+    BrowserInputTraceMessage([NSString stringWithFormat:@"page load FAILED %@", error]);
     if ([self.delegate respondsToSelector:@selector(webView:didFailLoadWithError:)]) {
         [self.delegate webView:self didFailLoadWithError:error];
     }
@@ -1179,6 +1200,7 @@ static NSURL *BrowserBuiltInPageURL(NSURL *URL) {
 
 - (void)webView:(id)webView didFailProvisionalNavigation:(id)navigation withError:(NSError *)error {
     self.loading = NO;
+    BrowserInputTraceMessage([NSString stringWithFormat:@"page load FAILED (provisional) %@", error]);
     if ([self.delegate respondsToSelector:@selector(webView:didFailLoadWithError:)]) {
         [self.delegate webView:self didFailLoadWithError:error];
     }
@@ -1186,6 +1208,7 @@ static NSURL *BrowserBuiltInPageURL(NSURL *URL) {
 
 - (void)webViewWebContentProcessDidTerminate:(id)webView {
     self.loading = NO;
+    BrowserInputTraceMessage(@"web content process TERMINATED");
 }
 
 - (NSURLRequest *)requestFromNavigationAction:(id)navigationAction {

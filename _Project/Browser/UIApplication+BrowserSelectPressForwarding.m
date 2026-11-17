@@ -80,6 +80,22 @@ static UIPressType sBrowserSwallowedPressType = (UIPressType)-1;
 // Game mode: tvOS still turns the controller into Select / Menu / Play-Pause / arrow presses. They
 // are dropped here, before any responder sees them; otherwise B (Menu) would leave the app.
 BOOL BrowserGameModeSwallowsRemotePresses = NO;
+// When the last Menu press of any phase went through the app, so a controller button read
+// directly can tell whether tvOS already delivered the matching press.
+CFTimeInterval BrowserLastMenuPressTimestamp = 0;
+// Menu on the browser itself (nothing presented) is taken away from the system here. Left to the
+// responder chain it can still end up as "leave the app" even though the browser handled it.
+BOOL (^BrowserMenuPressShouldIntercept)(void) = nil;
+void (^BrowserMenuPressPerform)(void) = nil;
+void (^BrowserMenuPressBegan)(void) = nil;
+static BOOL sBrowserMenuPressIntercepted = NO;
+// Play/Pause is a media key once a page has a video: WKWebView consumes it and the
+// view controller never sees pressesBegan, so the Quick Menu only opened on pages
+// with no media. Take the press here, before that happens.
+void (^BrowserPlayPausePressPerform)(UIPressPhase phase) = nil;
+static BOOL sBrowserPlayPauseForMenu = NO;
+
+FOUNDATION_EXPORT void BrowserInputTraceMessage(NSString *message);
 
 static UIViewController *BrowserFindPresentedNativeVideoPlayerViewController(UIApplication *application, Class nativeVideoPlayerClass) {
     for (UIWindow *window in application.windows) {
@@ -192,7 +208,13 @@ static UIViewController *BrowserFindPresentedNativeVideoPlayerViewController(UIA
     BOOL skipSystemDelivery = NO;
     for (UIPress *press in presses) {
         nativeVideoPlayerViewController = BrowserFindPresentedNativeVideoPlayerViewController(self, nativeVideoPlayerClass);
+        if (press.type == UIPressTypeMenu) {
+            BrowserLastMenuPressTimestamp = CACurrentMediaTime();
+        }
         if (press.type == UIPressTypeMenu || press.type == UIPressTypePlayPause || press.type == UIPressTypeSelect) {
+            BrowserInputTraceMessage([NSString stringWithFormat:@"app press %@ %@ count=%lu nativePlayer=%d swallowed=%ld",
+                                      BrowserPressTypeString(press.type), BrowserPressPhaseString(press.phase),
+                                      (unsigned long)presses.count, nativeVideoPlayerViewController != nil, (long)sBrowserSwallowedPressType]);
             NSLog(@"[InputTrace][App] press=%@ phase=%@ top=%@",
                   BrowserPressTypeString(press.type),
                   BrowserPressPhaseString(press.phase),
@@ -201,16 +223,43 @@ static UIViewController *BrowserFindPresentedNativeVideoPlayerViewController(UIA
 
         if (press.type == sBrowserSwallowedPressType) {
             if (press.phase == UIPressPhaseEnded) {
-                SEL togglePlaybackSelector = NSSelectorFromString(@"togglePlayback");
-                if ((press.type == UIPressTypePlayPause || press.type == UIPressTypeSelect) &&
-                    [nativeVideoPlayerViewController respondsToSelector:togglePlaybackSelector]) {
-                    dispatch_async(dispatch_get_main_queue(), ^{
-                        ((void (*)(id, SEL))objc_msgSend)(nativeVideoPlayerViewController, togglePlaybackSelector);
-                    });
+                if (press.type == UIPressTypePlayPause && sBrowserPlayPauseForMenu && BrowserPlayPausePressPerform != nil) {
+                    BrowserPlayPausePressPerform(UIPressPhaseEnded);
+                } else {
+                    SEL togglePlaybackSelector = NSSelectorFromString(@"togglePlayback");
+                    if ((press.type == UIPressTypePlayPause || press.type == UIPressTypeSelect) &&
+                        [nativeVideoPlayerViewController respondsToSelector:togglePlaybackSelector]) {
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                            ((void (*)(id, SEL))objc_msgSend)(nativeVideoPlayerViewController, togglePlaybackSelector);
+                        });
+                    }
                 }
+            }
+            if ((press.phase == UIPressPhaseCancelled) && press.type == UIPressTypePlayPause &&
+                sBrowserPlayPauseForMenu && BrowserPlayPausePressPerform != nil) {
+                BrowserPlayPausePressPerform(UIPressPhaseCancelled);
+            }
+            if (press.phase == UIPressPhaseEnded && press.type == UIPressTypeMenu && sBrowserMenuPressIntercepted &&
+                BrowserMenuPressPerform != nil) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    BrowserMenuPressPerform();
+                });
             }
             if (press.phase == UIPressPhaseEnded || press.phase == UIPressPhaseCancelled) {
                 sBrowserSwallowedPressType = (UIPressType)-1;
+                sBrowserMenuPressIntercepted = NO;
+                sBrowserPlayPauseForMenu = NO;
+            }
+            return;
+        }
+
+        if (press.type == UIPressTypeMenu && press.phase == UIPressPhaseBegan && nativeVideoPlayerViewController == nil &&
+            BrowserMenuPressShouldIntercept != nil && BrowserMenuPressShouldIntercept()) {
+            BrowserInputTraceMessage(@"app intercepts Menu");
+            sBrowserSwallowedPressType = UIPressTypeMenu;
+            sBrowserMenuPressIntercepted = YES;
+            if (BrowserMenuPressBegan != nil) {
+                BrowserMenuPressBegan();
             }
             return;
         }
@@ -229,6 +278,13 @@ static UIViewController *BrowserFindPresentedNativeVideoPlayerViewController(UIA
         if (press.type == UIPressTypePlayPause && press.phase == UIPressPhaseBegan) {
             if (nativeVideoPlayerClass != Nil && nativeVideoPlayerViewController != nil) {
                 sBrowserSwallowedPressType = UIPressTypePlayPause;
+                return;
+            }
+            if (BrowserPlayPausePressPerform != nil) {
+                BrowserInputTraceMessage(@"app intercepts PlayPause for Quick Menu");
+                sBrowserSwallowedPressType = UIPressTypePlayPause;
+                sBrowserPlayPauseForMenu = YES;
+                BrowserPlayPausePressPerform(UIPressPhaseBegan);
                 return;
             }
         }
@@ -262,11 +318,14 @@ static UIViewController *BrowserFindPresentedNativeVideoPlayerViewController(UIA
     @try {
         [self browser_sendEvent:event];
     } @catch (NSException *exception) {
+        BrowserInputTraceMessage([NSString stringWithFormat:@"EXCEPTION while delivering press: %@ | %@", exception.reason,
+                                  [exception.callStackSymbols componentsJoinedByString:@" | "]]);
         NSLog(@"[InputTrace][App] ignored press exception %@", exception.reason);
     }
 
     for (UIPress *press in presses) {
         if (press.type == UIPressTypeSelect && press.phase == UIPressPhaseEnded) {
+            BrowserInputTraceMessage(@"app posts global select");
             NSLog(@"[InputTrace][App] post BrowserGlobalSelectPressEndedNotification");
             dispatch_async(dispatch_get_main_queue(), ^{
                 [[NSNotificationCenter defaultCenter] postNotificationName:BrowserGlobalSelectPressEndedNotification object:nil];

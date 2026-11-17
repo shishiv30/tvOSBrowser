@@ -64,11 +64,8 @@
 - (void)installDefaultFavorites {
     NSArray<NSArray<NSString *> *> *defaultFavorites = @[
         @[@"https://www.kubb.tv", @"kubb"],
-        @[@"https://www.douyin.com", @"douyin"],
-        @[@"https://www.rednote.com", @"rednote"],
-        @[@"https://www.bilibili.com", @"bilibili"],
         @[@"https://www.suno.com", @"suno"],
-        @[@"https://www.youtube.com", @"youtube"],
+        @[@"https://www.magewords.com", @"magewords"],
         @[@"tvbrowser://gamepad-test", @"Gamepad Test"],
     ];
     NSMutableArray *existingFavorites = [[[NSUserDefaults standardUserDefaults] arrayForKey:@"FAVORITES"] mutableCopy];
@@ -77,7 +74,7 @@
     }
 
     // Former defaults: dropped from an existing install so the replacement does not sit next to them.
-    NSSet<NSString *> *retiredDefaultHosts = [NSSet setWithObject:@"iyf.tv"];
+    NSSet<NSString *> *retiredDefaultHosts = [NSSet setWithObjects:@"iyf.tv", @"douyin.com", @"rednote.com", @"bilibili.com", @"youtube.com", @"youtu.be", nil];
 
     NSMutableArray *favorites = [NSMutableArray array];
     NSMutableSet<NSString *> *defaultHosts = [NSMutableSet set];

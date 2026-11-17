@@ -196,14 +196,15 @@ The remote and gamepads use the same set of logical keys:
 
 | Logical key | Siri Remote | Gamepad |
 | --- | --- | --- |
-| Move pointer | Arrow keys / touch surface | D-pad, left stick; hold a trigger to speed up |
+| Move pointer | Arrow keys / touch surface | D-pad, left stick; hold a trigger (L2 / R2, ZL / ZR, LT / RT) to speed up |
+| Back / forward in history | Quick Menu | L1 / L / LB goes back, R1 / R / RB goes forward |
 | Confirm (click) | Select | A |
 | Cancel (back) | Menu / Back | B |
 | Menu (Quick Menu) | Play / Pause | X, Y, short-press − |
 | Scroll page | Quickly press Up / Down twice | Right stick, or quickly press the D-pad twice |
 | Game Mode toggle | — | Hold − (Create on PS5, View on Xbox) for 0.7 seconds |
 
-- **Watching video**: move the pointer onto a video and press Select, and the video fills the screen. While fullscreen, Left / Right seeks back / forward 10 seconds, Select pauses / plays, and Cancel exits fullscreen.
+- **Watching video**: open the Quick Menu and choose **Full Screen Video** (the first item); the video under the pointer, or the page's main video, fills the screen. Select itself only clicks. While fullscreen, Left / Right seeks back / forward 10 seconds, Select pauses / plays, and Cancel exits fullscreen.
 - **Quick Menu**: Back, Forward, enter a URL or search, Refresh, Hide Top Bar, Ad Block toggle, Game Mode, More Options, Bookmarks.
 - **Game Mode**: when on, the gamepad no longer controls the browser and is instead handed to the web page through the standard Gamepad API, for playing browser games. Hold the same button again to exit. **Gamepad Test** in the bookmarks lets you check that every gamepad button works.
 - **New tabs**: links that would "open in a new window" navigate directly in the current page.
